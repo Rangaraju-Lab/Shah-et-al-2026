@@ -1,8 +1,8 @@
-# Mitochondria structurally remodel near synapses to fuel the sustained energy demands of plasticity
+# Mitochondria remodel near synapses to boost metabolic capacity and fuel plasticity
 
 This repository contains all analysis scripts and data-processing pipelines used in:
 
-**Shah et. al. 2025**  
+**Shah et. al. 2026**  
 *Mitochondria structurally remodel near synapses to fuel the sustained energy demands of plasticity.*  
 bioRxiv. [https://www.biorxiv.org/content/10.1101/2025.08.27.672715v1](https://www.biorxiv.org/content/10.1101/2025.08.27.672715v1)
 
