@@ -1,33 +1,34 @@
 # Mitochondria remodel near synapses to boost metabolic capacity and fuel plasticity
 
-This repository contains all analysis scripts and data-processing pipelines used in:
+Analysis code for **Shah et al., _Mitochondria remodel near synapses to boost metabolic capacity and fuel plasticity_**, bioRxiv (2026). [Read the current preprint (v3)](https://www.biorxiv.org/content/10.1101/2025.08.27.672715v3).
 
-**Shah et. al. 2026**  
-*Mitochondria structurally remodel near synapses to fuel the sustained energy demands of plasticity.*  
-bioRxiv. [https://www.biorxiv.org/content/10.1101/2025.08.27.672715v1](https://www.biorxiv.org/content/10.1101/2025.08.27.672715v1)
+This repository organizes image processing, 3D reconstruction, quantitative analysis, and figure generation by their corresponding manuscript figures. It spans live-cell confocal imaging, connectomics, mitochondrial and spine ATP measurements, electron tomography, 3D DNA-PAINT, and mitochondrial protein kinase A inhibition experiments.
 
-Please cite this paper when using any of these analysis scripts or data-processing pipelines.
+## Find the analysis for a figure
 
----
+| Figure | Analysis and measurements |
+| --- | --- |
+| **Fig. 1** | Confocal analysis of juxtaspinal mitochondrial area and connectomics analysis of mitochondrial volume near synapses. |
+| **Fig. 2** | Mitochondrial ATP and spine ATP measurements. |
+| **Fig. 3** | Electron-tomogram analysis of the inner mitochondrial membrane (IMM), cristae membranes (CM), cristae junctions (CJ), and high-curvature (high-k1) cristae membrane regions. |
+| **Fig. 4** | 3D DNA-PAINT analysis of MIC60 and ATP synthase. |
+| **Fig. 5** | Mitochondria-ER contact site (MERCS) and ribosome cluster analysis using the electron tomograms analyzed in Fig. 3. |
+| **Fig. 6** | Confocal mitochondrial morphology, mitochondrial ATP, and spine size analyses in mitochondrial PKI experiments. |
+| **Fig. S4** | Deep-learning pipeline for segmentation of the mitochondrial intermembrane space (IMS), outer mitochondrial membrane (OMM), inner boundary membrane (IBM), endoplasmic reticulum (ER), and ribosomes in electron tomograms. |
 
-## Repository Structure
+## Repository structure
 
-The repository contains two top-level folders:
+### `Image and Mesh Analysis/`
 
-### 1. Image and Mesh Analysis
-Analysis pipelines for confocal and electron tomography (EM) data.
+Image-processing and 3D analysis pipelines for confocal microscopy, connectomics, electron tomography, and 3D DNA-PAINT. These scripts cover segmentation, quantitative measurements, and mesh generation and analysis for the structures shown in the manuscript. The Fig. S4 segmentation pipeline produces labels used in the electron-tomogram analyses; the Fig. 3 and Fig. 5 analyses draw on the same tomograms.
 
-- **Fig 1, 7, S5**  
-  Scripts for analysis of confocal microscopy data, including mitochondrial and spine segmentation, measurements for mito length, local mito area, high-width mito regions, and related measurements.
+### `Statistics and Plots/`
 
-- **Fig 2, S2**  
-  Deep-learning segmentation pipeline for mitochondrial intermembrane space (IMS) in electron tomograms (adaptable to other ultrastructures).  
-  Includes scripts for generating meshes from segmentations, used for the 3D reconstructions shown in Fig 3, S3, 4, and 6.
+Scripts for the quantitative analyses, statistical tests, and plots associated with the manuscript figures and supplementary figures. Figure-specific subfolders provide the entry point for locating the code behind each graph.
 
-- **Fig 3, S3, 4, 6**  
-  Complete 3D mesh analysis and visualization tools for mitochondrial inner membrane density, cristae membrane density, cristae curvature, cristae junction analysis, ER–mitochondria contact sites (ERMCS), and ribosomal clusters.
+## Citation
 
-### 2. Statistics and Plots
-Scripts to reproduce all quantitative analyses and statistical figures presented in **Shah et al., 2025**.  
-Each subfolder corresponds to individual figures and supplements.
+If you use code from this repository, please cite:
+
+Shah, M., et al. (2026). *Mitochondria remodel near synapses to boost metabolic capacity and fuel plasticity*. bioRxiv. https://doi.org/10.1101/2025.08.27.672715
 
