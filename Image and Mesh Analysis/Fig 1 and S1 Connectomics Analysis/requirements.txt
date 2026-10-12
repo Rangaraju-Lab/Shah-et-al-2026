@@ -1,0 +1,10 @@
+numpy>=1.26,<3
+pandas>=2.1,<3
+scipy>=1.11,<2
+networkx>=3.2,<4
+trimesh>=4,<6
+skeletor>=1.7.1,<2
+rtree>=1.2,<2
+matplotlib>=3.8,<4
+vtk>=9.3,<10
+tqdm>=4.66,<5
