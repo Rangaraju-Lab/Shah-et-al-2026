@@ -93,26 +93,14 @@ Preserve the five-channel count and biological role order below. Renaming files 
 ## Model architecture
 
 ```mermaid
-flowchart TD
-    I["EM patch: 1 channel"] --> E0["Encoder 0: 24 channels"]
-    E0 --> E1["Encoder 1: 48 channels"]
-    E1 --> E2["Encoder 2: 96 channels"]
-    E2 --> E3["Encoder 3: 192 channels"]
-    E3 --> B["Bottleneck: 384 channels"]
-    B --> A["Spatial self-attention: 4 heads"]
-    A --> D3["Upsample, concatenate, residual block: 192"]
-    E3 -->|skip| D3
-    D3 --> D2["Upsample, concatenate, residual block: 96"]
-    E2 -->|skip| D2
-    D2 --> D1["Upsample, concatenate, residual block: 48"]
-    E1 -->|skip| D1
-    D1 --> D0["Upsample, concatenate, residual block: 24"]
-    E0 -->|skip| D0
-    D0 --> S["Segmentation head: 5 logits"]
-    D0 --> H["Boundary head: 5 logits"]
-    D0 --> F["Affinity head: 12 logits"]
-    S --> G["Sigmoid and biological hierarchy gates"]
-    G --> P["OMM, IBM, IMS, ER, Ribo probabilities"]
+flowchart LR
+    I["EM patch: 1 channel"] --> E["Residual encoder: 24 → 48 → 96 → 192"]
+    E --> B["Bottleneck: 384 channels; spatial self-attention, 4 heads"]
+    B --> D["Residual decoder: 192 → 96 → 48 → 24"]
+    E -->|"4 corresponding skip connections"| D
+    D --> S["5 segmentation logits → sigmoid → hierarchy gates → probabilities"]
+    D --> H["Boundary head: 5 logits"]
+    D --> F["Affinity head: 12 logits"]
 ```
 
 The skip connections join corresponding encoder and decoder scales. Boundary and affinity heads provide auxiliary supervision during training; inference exports the hierarchy-constrained segmentation probabilities and binary masks. The diagram renders directly on GitHub without an external image file.
