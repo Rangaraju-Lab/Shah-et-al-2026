@@ -92,50 +92,34 @@ Preserve the five-channel count and biological role order below. Renaming files 
 
 ## Model architecture
 
-The full architecture is shown left to right in connected sections. Repeated node names identify the same feature tensors between sections.
-
-### Encoder
-
 ```mermaid
-flowchart LR
-    I["EM patch: 1 channel"] --> E0["Encoder 0: 24 channels"]
-    E0 --> E1["Encoder 1: 48 channels"]
-    E1 --> E2["Encoder 2: 96 channels"]
-    E2 --> E3["Encoder 3: 192 channels"]
-```
-
-### Bottleneck and self-attention
-
-```mermaid
-flowchart LR
-    E3["Encoder 3: 192 channels"] --> B["Bottleneck: 384 channels"]
-    B --> A["Spatial self-attention: 4 heads"]
-    A --> D3["Decoder 3 input"]
-```
-
-### Decoder and all four skip connections
-
-```mermaid
-flowchart LR
-    A["Attention output"] --> D3["Upsample, concatenate, residual block: 192"]
-    D3 --> D2["Upsample, concatenate, residual block: 96"]
-    D2 --> D1["Upsample, concatenate, residual block: 48"]
-    D1 --> D0["Upsample, concatenate, residual block: 24"]
-    E3["Encoder 3: 192 channels"] -->|skip| D3
-    E2["Encoder 2: 96 channels"] -->|skip| D2
-    E1["Encoder 1: 48 channels"] -->|skip| D1
-    E0["Encoder 0: 24 channels"] -->|skip| D0
-```
-
-### Output heads and hierarchy gating
-
-```mermaid
-flowchart LR
-    D0["Decoder output: 24 channels"] --> S["Segmentation head: 5 logits"]
-    D0 --> H["Boundary head: 5 logits"]
-    D0 --> F["Affinity head: 12 logits"]
-    S --> G["Sigmoid and biological hierarchy gates"]
-    G --> P["OMM, IBM, IMS, ER, Ribo probabilities"]
+block-beta
+    columns 5
+    I["EM patch: 1 channel"] space:2 H["Boundary head: 5 logits"] F["Affinity head: 12 logits"]
+    E0["Encoder 0: 24 channels"] space:2 D0["Upsample, concatenate, residual block: 24"] S["Segmentation head: 5 logits"]
+    E1["Encoder 1: 48 channels"] space:2 D1["Upsample, concatenate, residual block: 48"] G["Sigmoid and biological hierarchy gates"]
+    E2["Encoder 2: 96 channels"] space:2 D2["Upsample, concatenate, residual block: 96"] P["OMM, IBM, IMS, ER, Ribo probabilities"]
+    E3["Encoder 3: 192 channels"] space:2 D3["Upsample, concatenate, residual block: 192"] space
+    space B["Bottleneck: 384 channels"] A["Spatial self-attention: 4 heads"] space:2
+    I --> E0
+    E0 --> E1
+    E1 --> E2
+    E2 --> E3
+    E3 --> B
+    B --> A
+    A --> D3
+    D3 --> D2
+    D2 --> D1
+    D1 --> D0
+    E0 -->|skip| D0
+    E1 -->|skip| D1
+    E2 -->|skip| D2
+    E3 -->|skip| D3
+    D0 --> S
+    D0 --> H
+    D0 --> F
+    S --> G
+    G --> P
 ```
 
 The skip connections join corresponding encoder and decoder scales. Boundary and affinity heads provide auxiliary supervision during training; inference exports the hierarchy-constrained segmentation probabilities and binary masks. The diagram renders directly on GitHub without an external image file.
