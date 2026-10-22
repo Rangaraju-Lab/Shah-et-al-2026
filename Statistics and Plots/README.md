@@ -1,4 +1,4 @@
-# Statistics and Plots
+# Statistics and Plots (Requires update for 2026)
 
 This directory contains all statistical analysis and plotting workflows for the project.
 
