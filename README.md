@@ -1,5 +1,7 @@
 # Mitochondria remodel near synapses to boost metabolic capacity and fuel plasticity
 
+> **2026 manuscript update:** The analysis packages are being actively updated for the 2026 manuscript. The `Statistics and Plots/` folder has not yet been updated for 2026 and will be updated soon.
+
 Analysis code for **Shah et al., _Mitochondria remodel near synapses to boost metabolic capacity and fuel plasticity_**, bioRxiv (2026). [Read the current preprint (v3)](https://www.biorxiv.org/content/10.1101/2025.08.27.672715v3).
 
 This repository organizes image processing, 3D reconstruction, quantitative analysis, and figure generation by their corresponding manuscript figures. It spans live-cell confocal imaging, connectomics, mitochondrial and spine ATP measurements, electron tomography, 3D DNA-PAINT, and mitochondrial protein kinase A inhibition experiments.
@@ -20,15 +22,27 @@ This repository organizes image processing, 3D reconstruction, quantitative anal
 
 ### `Image and Mesh Analysis/`
 
-Image-processing and 3D analysis pipelines for confocal microscopy, connectomics, electron tomography, and 3D DNA-PAINT. These scripts cover segmentation, quantitative measurements, and mesh generation and analysis for the structures shown in the manuscript. The Fig. S4 segmentation pipeline produces labels used in the electron-tomogram analyses; the Fig. 3 and Fig. 5 analyses draw on the same tomograms.
+Image-processing and 3D analysis pipelines for confocal microscopy, connectomics, electron tomography, and 3D DNA-PAINT, organized into the following folders:
+
+| Folder | Contents |
+| --- | --- |
+| `Fig 1, S1 Connectomics Analysis` | Spine-base finding, mitochondrial width mapping, and mitochondrial morphology analysis. |
+| `Fig 1, S1, 6 Mitochondria and PSD95 Deep-Learning Segmentation` | Deep-learning segmentation of mitochondria and PSD95. |
+| `Fig 2, S2, 6 MitoATP and SpineATP Analysis` | Mitochondrial ATP and spine ATP measurements. |
+| `Fig 3, S5, S6, S7, S8, S10, S11 Tomogram Mesh Analysis` | Electron-tomogram mesh generation and quantitative analysis of mitochondrial ultrastructure, ER contacts, and ribosomes. |
+| `Fig 4, S9 DNA-PAINT ATP Synthase MIC60` | SMLM clustering, juxtaspinal and nonjuxtaspinal measurements, and supplementary DNA-PAINT analyses. |
+| `Fig S4 Tomogram Deep-Learning Segmentation` | Deep-learning training and inference for electron-tomogram segmentation. |
+
+Each package includes its own README with setup instructions, input requirements, and commands for running the analysis. The Fig. S4 segmentation pipeline produces labels used in the electron-tomogram analyses; the Fig. 3 and Fig. 5 analyses draw on the same tomograms.
 
 ### `Statistics and Plots/`
 
 Scripts for the quantitative analyses, statistical tests, and plots associated with the manuscript figures and supplementary figures. Figure-specific subfolders provide the entry point for locating the code behind each graph.
+
+**This folder has not yet been updated for the 2026 manuscript and will be updated soon.**
 
 ## Citation
 
 If you use code from this repository, please cite:
 
 Shah, M., et al. (2026). *Mitochondria remodel near synapses to boost metabolic capacity and fuel plasticity*. bioRxiv. https://doi.org/10.1101/2025.08.27.672715
-
