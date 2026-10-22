@@ -1,0 +1,74 @@
+[
+  {
+    "source": "00_scale_segmentations(1).py",
+    "packaged": "scripts/00_scale_segmentations.py"
+  },
+  {
+    "source": "01_mesh_segmentations(1).py",
+    "packaged": "scripts/01_mesh_segmentations.py"
+  },
+  {
+    "source": "02_run_parallel_blender_remesh(1).py",
+    "packaged": "scripts/02_run_parallel_blender_remesh.py"
+  },
+  {
+    "source": "02b_blender_remesh_worker(1).py",
+    "packaged": "scripts/02b_blender_remesh_worker.py"
+  },
+  {
+    "source": "03_trim_extrusions(1).py",
+    "packaged": "scripts/03_trim_extrusions.py"
+  },
+  {
+    "source": "04_make_matrix_and_membranes(1).py",
+    "packaged": "scripts/04_make_matrix_and_membranes.py"
+  },
+  {
+    "source": "05_run_parallel_blendgamer_curvature(1).py",
+    "packaged": "scripts/05_run_parallel_blendgamer_curvature.py"
+  },
+  {
+    "source": "05b_blendgamer_curvature_worker(1).py",
+    "packaged": "scripts/05b_blendgamer_curvature_worker.py"
+  },
+  {
+    "source": "06_make_surfaces(1).py",
+    "packaged": "scripts/06_make_surfaces.py"
+  },
+  {
+    "source": "07_make_CJ(1).py",
+    "packaged": "scripts/07_make_CJ.py"
+  },
+  {
+    "source": "08_measure_cristae_props copy(1).py",
+    "packaged": "scripts/08b_measure_cristae_basic.py"
+  },
+  {
+    "source": "08_measure_cristae_props(1).py",
+    "packaged": "scripts/08_measure_cristae_props.py"
+  },
+  {
+    "source": "09_measure_ER_props(1).py",
+    "packaged": "scripts/09_measure_ER_props.py"
+  },
+  {
+    "source": "10_measure_ribo_props(1).py",
+    "packaged": "scripts/10_measure_ribo_props.py"
+  },
+  {
+    "source": "11_batch_visualize_cristae_screenshot_2um(1).py",
+    "packaged": "scripts/11_batch_visualize_cristae_screenshot_2um.py"
+  },
+  {
+    "source": "12_batch_visualize_curvature_screenshot_2um(1).py",
+    "packaged": "scripts/12_batch_visualize_curvature_screenshot_2um.py"
+  },
+  {
+    "source": "13_batch_visualize_ERMCS_screenshot_2um(1).py",
+    "packaged": "scripts/13_batch_visualize_ERMCS_screenshot_2um.py"
+  },
+  {
+    "source": "13b_visualize_ERMCS_screenshot_2um_control1_2(1).py",
+    "packaged": "scripts/13b_visualize_ERMCS_screenshot_2um_control1_2.py"
+  }
+]
