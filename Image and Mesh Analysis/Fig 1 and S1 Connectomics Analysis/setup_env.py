@@ -10,8 +10,8 @@ def main():
     parser = argparse.ArgumentParser(description="Create the local environment and sample input folder.")
     parser.add_argument("--skip-install", action="store_true", help="Create the environment and folders without installing packages.")
     args = parser.parse_args()
-    if sys.version_info < (3, 10):
-        parser.error("Python 3.10 or newer is required; Python 3.11 is recommended.")
+    if sys.version_info < (3, 11):
+        parser.error("Python 3.11 or newer is required; Python 3.12 is recommended.")
     env = ROOT / ".venv"
     if not env.exists():
         venv.EnvBuilder(with_pip=True).create(env)

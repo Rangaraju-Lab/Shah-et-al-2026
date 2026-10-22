@@ -15,20 +15,16 @@ python setup_env.py
 Merge the matching folder from the sample-data repository into this folder, placing the three inputs in `sample data`. On Windows PowerShell:
 
 ```powershell
-.\.venv\Scripts\python.exe smoke_test.py
 .\.venv\Scripts\python.exe run_sample.py
 ```
 
 On macOS/Linux:
 
 ```bash
-.venv/bin/python smoke_test.py
 .venv/bin/python run_sample.py
 ```
 
-Setup creates `.venv`, installs `requirements.txt`, checks dependencies, and preserves existing sample files. No activation is needed when invoking the environment's Python directly. If your system uses the `python3` launcher, use `python3 setup_env.py`.
-
-The smoke test uses analytical fixtures to test the knee fit, anchored smoothing, spine graph logic, widths, surface distances, volumes, and morphology rules. It does not require the distributed sample mesh. `run_sample.py` uses your supplied sample data and runs the complete numerical workflow.
+Setup creates `.venv`, installs `requirements.txt`, and preserves existing sample files. No activation is needed when invoking the environment's Python directly. If your system uses the `python3` launcher, use `python3 setup_env.py`.
 
 ## Folder structure
 
@@ -39,19 +35,12 @@ Fig 1 and S1 Connectomics Analysis/
 ├── setup_env.py
 ├── settings.py
 ├── run_sample.py
-├── smoke_test.py
-├── make_schematics.py
 ├── algorithm_provenance.json
 ├── algorithms/
 │   ├── spine_base.py
 │   ├── mitochondrial_width.py
 │   ├── spine_mito_mapping.py
 │   └── morphology.py
-├── assets/
-│   ├── spine_base_math.png
-│   ├── spine_base_math.svg
-│   ├── mitochondrial_mapping_logic.png
-│   └── mitochondrial_mapping_logic.svg
 ├── sample data/
 │   ├── neuron.npz
 │   ├── mitochondria.npz
@@ -59,7 +48,7 @@ Fig 1 and S1 Connectomics Analysis/
 └── results/                        # created during analysis
 ```
 
-The `sample data` folder is supplied empty for merging with the separate data distribution. `.gitkeep` retains it in Git. Both schematics are already included; their SVG versions are editable, and `make_schematics.py` regenerates them. Diagram geometry and radius curves are illustrative, not experimental measurements.
+The `sample data` folder is supplied empty for merging with the separate data distribution. `.gitkeep` retains it in Git.
 
 ## Inputs and units
 
@@ -88,8 +77,6 @@ The original coordinate convention is retained: synapse positions are **voxel co
 Filenames, input/output paths, column names, voxel size, and numerical parameters are configured in `settings.py`. To use different CSV column names, change `SYNAPSE_ID_COLUMN`, `X_COL`, `Y_COL`, and `Z_COL`. No dataset-specific neuron-ID column is required. Integer synapse IDs are needed because the retained extended SWC format stores IDs numerically.
 
 ## Spine-base finding: math and logic
-
-![Spine-base algorithm and equations](assets/spine_base_math.png)
 
 The method turns a synapse-centered surface neighborhood into a skeleton trace, establishes a dendritic reference, and identifies the spine-base transition from its radius profile.
 
@@ -156,8 +143,6 @@ The custom base-selection and refinement logic is explicit in `algorithms/spine_
 
 ## Mitochondrial centerline and width mapping
 
-![Mitochondrial mapping and morphology rules](assets/mitochondrial_mapping_logic.png)
-
 The supplied mitochondrial routine skeletonizes the mesh and assigns skeleton components to mitochondrial mesh components by nearest-surface evidence. For each mitochondrial object, it keeps the assigned skeleton component with the longest main path and retains attached branches at least 1,000 nm long. The longest-path helper includes the source's cycle fallback. Segments between endpoints/junctions are relaxed with the same normal/tangent update, keeping their endpoints fixed.
 
 Exact wavefront spacing is 30 nm by default. The original routine falls back to ordinary `by_wavefront` if exact skeletonization raises an exception. The ordinary API interprets its step parameter as graph hops rather than physical-distance spacing; this source behavior is retained.
@@ -203,13 +188,13 @@ Define nearby mitochondria as base-to-surface **absolute** distance ≤ 2,000 nm
 | Recruitment | Widening that does not meet the protrusion rule |
 | Budding | Synapse-to-mito surface distance ≤ 500 nm, synapse-nearest volume ≥ 0.01 µm³, and unequal base-nearest/synapse-nearest volumes |
 
-The protrusion signed-distance criterion admits negative values, including bases inside mitochondria. The nearby filter still uses absolute distance. Budding is independent of the widening rules, so it can overlap with protrusion or recruitment. The volume inequality is the source code's proxy for different objects; it is not a component-ID inequality, and distinct objects with exactly equal volumes will not satisfy it. These details are retained in code and shown in the schematic.
+The protrusion signed-distance criterion admits negative values, including bases inside mitochondria. The nearby filter still uses absolute distance. Budding is independent of the widening rules, so it can overlap with protrusion or recruitment. The volume inequality is the source code's proxy for different objects; it is not a component-ID inequality, and distinct objects with exactly equal volumes will not satisfy it. These details are retained in code.
 
 The source renderer averages repeated measurements per sample/synapse before applying its rules. The sample runner saves every matching category membership without a screenshot cap, plus a measurement table labeling unmatched rows as `none`. Category rendering preserves the original top-100-per-category cap, sort order, colors, opacity, orientation, and scale settings.
 
 ## Run individual stages
 
-To test only the main spine-base algorithm:
+To run only the main spine-base algorithm:
 
 ```powershell
 .\.venv\Scripts\python.exe run_sample.py --stage spine
@@ -263,7 +248,7 @@ The sample runner recomputes its selected stages and overwrites their outputs; i
 
 ## Reproducibility and scope
 
-`settings.py` retains the supplied numerical defaults. The retained routine bodies are unchanged and were compared by their parsed Python syntax. Batch scheduling, dataset-ID discovery, and dataset-specific paths are replaced by the sample runner. New files summarize per-synapse outcomes, uncapped category memberships, and effective settings.
+`settings.py` retains the supplied numerical defaults. The numerical and rendering routines retain the supplied implementation. Batch scheduling, dataset-ID discovery, and dataset-specific paths are replaced by the sample runner. New files summarize per-synapse outcomes, uncapped category memberships, and effective settings.
 
 Dependency version ranges are provided. To record a resolved Windows environment:
 
@@ -271,4 +256,4 @@ Dependency version ranges are provided. To record a resolved Windows environment
 .\.venv\Scripts\python.exe -m pip freeze > requirements-resolved.txt
 ```
 
-
+The experimental sample is supplied separately through the data repository. General performance and accuracy depend on surface sampling, local geometry, annotation placement, and the chosen parameter scales.
