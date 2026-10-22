@@ -1,0 +1,30 @@
+[
+  {
+    "source": "smlm_cluster_all.py",
+    "packaged": "scripts/00_smlm_cluster.py"
+  },
+  {
+    "source": "measure_juxtaspinal.py",
+    "packaged": "scripts/01_measure_juxtaspinal.py"
+  },
+  {
+    "source": "measure_nonjuxtaspinal.py",
+    "packaged": "scripts/02_measure_nonjuxtaspinal.py"
+  },
+  {
+    "source": "measure_NeNA.py",
+    "packaged": "scripts/03_measure_NeNA.py"
+  },
+  {
+    "source": "QC_locs_per_cluster.py",
+    "packaged": "scripts/04_QC_locs_per_cluster.py"
+  },
+  {
+    "source": "QC_cluster_density_frames.py",
+    "packaged": "scripts/05_QC_cluster_density_frames.py"
+  },
+  {
+    "source": "measure_probe_density_per_mito.py",
+    "packaged": "scripts/06_measure_probe_density_per_mito.py"
+  }
+]
