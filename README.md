@@ -39,7 +39,6 @@ Each package includes its own README with setup instructions, input requirements
 
 Scripts for the quantitative analyses, statistical tests, and plots associated with the manuscript figures and supplementary figures. Figure-specific subfolders provide the entry point for locating the code behind each graph.
 
-**This folder has not yet been updated for the 2026 manuscript and will be updated soon.**
 
 ## Citation
 
