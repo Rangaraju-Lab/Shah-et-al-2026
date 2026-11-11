@@ -1,0 +1,1226 @@
+---
+title: "Figure 6: Compartment-specific PKA inhibition"
+knit: (function(inputFile, encoding) { inputFile <- normalizePath(inputFile); oldwd <- setwd(dirname(inputFile)); on.exit(setwd(oldwd)); rmarkdown::render(basename(inputFile), encoding = encoding, output_file = "Fig 6.html", knit_root_dir = getwd()) })
+output:
+  html_document:
+    theme: darkly
+    highlight: breezedark
+    df_print: paged
+    toc: true
+    toc_depth: 1
+    toc_float: true
+    code_folding: hide
+    self_contained: true
+    mathjax: null
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE, message = FALSE, warning = FALSE,
+  fig.width = 30, fig.height = 20, fig.retina = 1,
+  out.width = "100%", fig.align = "center"
+)
+
+suppressPackageStartupMessages({
+  library(dplyr)
+  library(readr)
+  library(tidyr)
+  library(ggplot2)
+  library(ggbeeswarm)
+  library(ggtext)
+  library(afex)
+  library(emmeans)
+})
+
+set.seed(20261109)
+options(width = 120, dplyr.summarise.inform = FALSE)
+options(contrasts = c("contr.treatment", "contr.poly"))
+
+```
+
+# Fig 6C
+
+MIC60 phosphorylation relative to total MIC60 following homeostatic plasticity, with compartment-specific PKA inhibition.
+
+**Source data**  
+`Fig 6C.csv`
+
+**Columns**
+
+- `Date` — Experiment date
+- `Condition` — Control, Matrix-PKI, or IMS-PKI construct
+- `Treatment` — Control or TTX
+- `phosphoMic60_ratio` — Phosphorylated MIC60 / total MIC60
+
+## Data
+
+Each date contributes one ratio per construct and treatment combination.
+
+```{r fig-6c-data}
+condition_order <- c("Control", "Matrix-PKI", "IMS-PKI")
+treatment_order <- c("Control", "TTX")
+group_order <- c("Control Control", "Control TTX", "Matrix-PKI Control", "Matrix-PKI TTX", "IMS-PKI Control", "IMS-PKI TTX")
+spacing_map <- c("Control Control" = 1, "Control TTX" = 2.2, "Matrix-PKI Control" = 4, "Matrix-PKI TTX" = 5.2, "IMS-PKI Control" = 7, "IMS-PKI TTX" = 8.2)
+
+Intensity_df <- read_csv("./Fig 6C.csv", show_col_types = FALSE)
+if (!"ratio" %in% names(Intensity_df) && "phosphoMic60_ratio" %in% names(Intensity_df)) Intensity_df <- rename(Intensity_df, ratio = phosphoMic60_ratio)
+missing_columns <- setdiff(c("Date", "Condition", "Treatment", "ratio"), names(Intensity_df))
+if (length(missing_columns)) stop("Missing columns: ", paste(missing_columns, collapse = ", "))
+
+Intensity_df <- Intensity_df %>%
+  mutate(
+    Date = trimws(as.character(Date)),
+    Condition = case_when(Condition %in% c("Mt-PKI", "Matrix PKI") ~ "Matrix-PKI", Condition == "IMS PKI" ~ "IMS-PKI", TRUE ~ trimws(as.character(Condition))),
+    Treatment = case_when(Treatment %in% c("-TTX", "(-TTX)") ~ "Control", Treatment %in% c("+TTX", "(+TTX)") ~ "TTX", TRUE ~ trimws(as.character(Treatment))),
+    ratio = as.numeric(ratio),
+    Condition = factor(Condition, levels = condition_order),
+    Treatment = factor(Treatment, levels = treatment_order),
+    Group = factor(paste(Condition, Treatment), levels = group_order),
+    x_pos = unname(spacing_map[as.character(Group)]),
+    Date = factor(Date)
+  ) %>%
+  filter(!is.na(Date), Date != "", !is.na(Group), is.finite(ratio))
+
+design_check <- Intensity_df %>% group_by(Date) %>% summarise(n = n(), n_Groups = n_distinct(Group), .groups = "drop")
+if (nrow(design_check) < 2 || any(design_check$n != 6 | design_check$n_Groups != 6)) stop("At least two dates are required, each with one value for all six groups.")
+
+Intensity_df %>% mutate(across(where(is.numeric), ~ round(.x, 3)))
+```
+
+## Summary
+
+```{r fig-6c-summary}
+summary_table <- Intensity_df %>%
+  group_by(Group) %>%
+  summarise(n_Experiment_Dates = n_distinct(Date), `Mean (SE)` = sprintf("%.3f (%.3f)", mean(ratio), sd(ratio) / sqrt(n())), .groups = "drop")
+
+summary_table
+```
+
+## Statistics
+
+Matched two-way ANOVA for construct and treatment, matched by experiment date. Treatment contrasts within construct use Tukey adjustment.
+
+```{r fig-6c-statistics}
+stats_df <- Intensity_df %>%
+  mutate(
+    Condition_stat = factor(c("Control" = "Control", "Matrix-PKI" = "MatrixPKI", "IMS-PKI" = "IMSPKI")[as.character(Condition)],
+                            levels = c("Control", "MatrixPKI", "IMSPKI")),
+    Treatment_stat = factor(Treatment, levels = c("Control", "TTX"))
+  )
+
+options(contrasts = c("contr.sum", "contr.poly"))
+fit_aov <- aov(ratio ~ Condition_stat * Treatment_stat +
+                Error(Date / (Condition_stat * Treatment_stat)), data = stats_df)
+
+summary(fit_aov)
+
+format_p <- function(p) ifelse(p < 0.0001, "<0.0001", sprintf("%.4f", p))
+p_to_stars <- function(p) case_when(p < 0.001 ~ "***", p < 0.01 ~ "**", p < 0.05 ~ "*", TRUE ~ "ns")
+
+treatment_means <- emmeans::emmeans(fit_aov, ~ Treatment_stat | Condition_stat)
+ttx_effects <- emmeans::contrast(treatment_means, "revpairwise", adjust = "tukey") %>%
+  as.data.frame() %>%
+  mutate(Condition = c("Control" = "Control", "MatrixPKI" = "Matrix-PKI", "IMSPKI" = "IMS-PKI")[as.character(Condition_stat)])
+
+means_table <- as.data.frame(treatment_means) %>%
+  mutate(
+    Condition = c("Control" = "Control", "MatrixPKI" = "Matrix-PKI", "IMSPKI" = "IMS-PKI")[as.character(Condition_stat)],
+    `Mean (SE)` = sprintf("%.3f (%.3f)", emmean, SE)
+  ) %>%
+  select(Condition, Treatment_stat, `Mean (SE)`) %>%
+  tidyr::pivot_wider(names_from = Treatment_stat, values_from = `Mean (SE)`, names_glue = "{Treatment_stat} mean (SE)")
+
+stats_table <- ttx_effects %>%
+  transmute(Condition, Comparison = "Control vs TTX", `p value` = format_p(p.value)) %>%
+  left_join(means_table, by = "Condition") %>%
+  select(Condition, Comparison, `Control mean (SE)`, `TTX mean (SE)`, `p value`)
+
+stats_table
+```
+
+## Plot
+
+```{r fig-6c-plot, fig.width=30, fig.height=20}
+set.seed(20261109)
+label_red <- "#D00000"
+group_colors <- c("Control Control" = "#777B7E", "Control TTX" = "#1A1A1A", "Matrix-PKI Control" = "#777B7E", "Matrix-PKI TTX" = "#1A1A1A", "IMS-PKI Control" = "#777B7E", "IMS-PKI TTX" = "#1A1A1A")
+
+plot_stats <- as.data.frame(ttx_effects) %>%
+  mutate(
+    group1_x = unname(spacing_map[paste(Condition, "Control")]),
+    group2_x = unname(spacing_map[paste(Condition, "TTX")]),
+    y_position = if_else(Condition %in% c("Control", "IMS-PKI"), 0.58, 0.54),
+    stars = p_to_stars(p.value)
+  ) %>% filter(stars != "ns")
+
+group_labels <- tibble(x = c(1.6, 4.6, 7.6), y = -0.07,
+                       label = c("control", "matrix-PKI", "IMS-PKI"))
+
+tick_labels <- c(
+  "<span>-</span>", "<span>+</span>",
+  paste0("<span style='color:", label_red, "'>-</span>"),
+  paste0("<span style='color:", label_red, "'>+</span>"),
+  "<span>-</span>", "<span>+</span>"
+)
+
+fig6c_plot <- ggplot(Intensity_df, aes(x_pos, ratio, color = Group)) +
+  geom_boxplot(aes(group = x_pos), fill = NA, width = 1, outlier.shape = NA, linewidth = 2, color = "black") +
+  ggbeeswarm::geom_beeswarm(cex = 9, priority = "random", size = 15, corral = "random") +
+  stat_summary(aes(group = x_pos), fun = mean, geom = "point", shape = 15, size = 20, color = "black") +
+  geom_segment(data = plot_stats, aes(x = group1_x, xend = group2_x, y = y_position, yend = y_position),
+               inherit.aes = FALSE, linewidth = 2, color = "black") +
+  geom_text(data = plot_stats, aes(x = (group1_x + group2_x) / 2, y = y_position + 0.02, label = stars),
+            inherit.aes = FALSE, size = 30, color = "black") +
+  geom_text(data = filter(group_labels, label != "matrix-PKI"), aes(x, y, label = label),
+            inherit.aes = FALSE, size = 30, color = "black") +
+  geom_text(data = filter(group_labels, label == "matrix-PKI"), aes(x, y, label = label),
+            inherit.aes = FALSE, size = 30, color = label_red) +
+  scale_x_continuous(breaks = unname(spacing_map), labels = tick_labels) +
+  scale_color_manual(values = group_colors, breaks = group_order) +
+  scale_y_continuous(breaks = c(0, 0.2, 0.4, 0.6), expand = c(0, 0)) +
+  coord_cartesian(ylim = c(0, 0.65), clip = "off") +
+  labs(x = NULL, y = "phospho-MIC60 / total MIC60") +
+  theme_classic() +
+  theme(axis.title = element_text(size = 80, color = "black"),
+        axis.text = element_text(size = 80, color = "black"),
+        axis.text.x = ggtext::element_markdown(size = 80, color = "black"),
+        axis.ticks = element_line(linewidth = 5, color = "black"),
+        axis.ticks.length = grid::unit(0.5, "cm"),
+        axis.line = element_line(linewidth = 2, color = "black"),
+        plot.margin = margin(20, 20, 220, 20),
+        legend.position = "none")
+
+fig6c_plot
+```
+
+```{r fig-6c-save, include=FALSE}
+dir.create("./Graphs", recursive = TRUE, showWarnings = FALSE)
+output_file <- "./Graphs/Fig 6C.png"
+ggsave(output_file, fig6c_plot, width = 30, height = 20, units = "in", dpi = 300)
+tibble(Figure = "Fig 6C", File = output_file)
+```
+
+# Fig 6D
+
+Mitochondrial area by region and homeostatic-plasticity treatment in Matrix-PKI-expressing neurons.
+
+**Source data**  
+`Fig 6D juxta.csv`, `Fig 6D nonjuxta.csv`
+
+**Columns**
+
+- `Date` — Experiment date
+- `Condition` — Control or TTX
+- `Dish` — Culture dish ID
+- `Cell` — Cell ID
+- `mito_area_um2` — Mean mitochondrial area per cell (µm²)
+
+## Data
+
+The input file identifies the region type. All cells express Matrix-PKI.
+
+```{r fig-6d-data}
+spacing_map <- c("Juxta Control" = 1, "Juxta TTX" = 2.2, "Non Juxta Control" = 3.8, "Non Juxta TTX" = 5)
+
+juxta_df <- read_csv("./Fig 6D juxta.csv", show_col_types = FALSE) %>%
+  select(Date, Condition, Dish, Cell, mito_area_um2) %>% mutate(Region = "Juxta")
+nonjuxta_df <- read_csv("./Fig 6D nonjuxta.csv", show_col_types = FALSE) %>%
+  select(Date, Condition, Dish, Cell, mito_area_um2) %>% mutate(Region = "Non Juxta")
+
+mito_df <- bind_rows(juxta_df, nonjuxta_df) %>%
+  mutate(Condition = trimws(as.character(Condition))) %>%
+  filter(grepl("Matrix-PKI", Condition, ignore.case = TRUE)) %>%
+  mutate(
+    Condition = case_when(
+      grepl("^Control", Condition, ignore.case = TRUE) ~ "Control",
+      grepl("^TTX", Condition, ignore.case = TRUE) ~ "TTX"
+    ),
+    Date = factor(trimws(as.character(Date))),
+    Condition = factor(Condition, levels = c("Control", "TTX")),
+    Region = factor(Region, levels = c("Juxta", "Non Juxta")),
+    mito_area_um2 = as.numeric(mito_area_um2),
+    Group = factor(paste(Region, Condition), levels = names(spacing_map)),
+    x_pos = unname(spacing_map[as.character(Group)]),
+    Group_Date = paste(Group, Date, sep = "_")
+  ) %>%
+  filter(!is.na(Date), !is.na(Condition), !is.na(Region), is.finite(mito_area_um2))
+
+if (!nrow(mito_df) || n_distinct(mito_df$Group) < 4 || n_distinct(mito_df$Date) < 2)
+  stop("All four Condition x Region groups and at least two dates are required.")
+
+mito_df %>%
+  select(Date, Condition, Dish, Cell, Region, mito_area_um2) %>%
+  mutate(across(where(is.numeric), ~ round(.x, 3)))
+```
+
+## Summary
+
+```{r fig-6d-summary}
+summary_table <- mito_df %>%
+  group_by(Group) %>%
+  summarise(
+    n_Cells = n_distinct(Date, Dish, Cell),
+    n_Experiment_Dates = n_distinct(Date),
+    `Mean (SE)` = sprintf("%.3f (%.3f)", mean(mito_area_um2),
+                          sd(mito_area_um2) / sqrt(n())),
+    .groups = "drop"
+  )
+
+summary_table
+```
+
+## Statistics
+
+Three-way ANOVA with condition, region, experiment date, and their interactions (Type I sums of squares). Pairwise comparisons use Tukey adjustment.
+
+```{r fig-6d-statistics}
+format_p <- function(p) ifelse(is.na(p), NA_character_,
+                               ifelse(p < 0.0001, "<0.0001", sprintf("%.4f", p)))
+p_to_stars <- function(p) case_when(
+  is.na(p) ~ NA_character_, p < 0.001 ~ "***",
+  p < 0.01 ~ "**", p < 0.05 ~ "*", TRUE ~ "ns"
+)
+
+fit_aov <- aov(mito_area_um2 ~ Condition * Region * Date, data = mito_df)
+aov_tab <- anova(fit_aov)
+
+anova_table <- as.data.frame(aov_tab) %>%
+  tibble::rownames_to_column("Effect") %>%
+  filter(trimws(Effect) != "Residuals") %>%
+  transmute(
+    Effect = dplyr::recode(
+      trimws(Effect),
+      Condition = "Condition", Region = "Region", Date = "Date",
+      `Condition:Region` = "Condition x Region",
+      `Condition:Date` = "Condition x Date",
+      `Region:Date` = "Region x Date",
+      `Condition:Region:Date` = "Condition x Region x Date"
+    ),
+    df = Df, F = round(`F value`, 3), `p value` = format_p(`Pr(>F)`)
+  )
+
+anova_table
+
+cell_emm <- emmeans::emmeans(fit_aov, ~ Region * Condition)
+cell_means <- as.data.frame(cell_emm) %>%
+  mutate(Group = paste(Region, Condition))
+
+pair_list <- combn(cell_means$Group, 2, simplify = FALSE)
+contrast_list <- setNames(lapply(pair_list, function(pair) {
+  contrast_vector <- rep(0, nrow(cell_means))
+  contrast_vector[match(pair[1], cell_means$Group)] <- 1
+  contrast_vector[match(pair[2], cell_means$Group)] <- -1
+  contrast_vector
+}), vapply(pair_list, paste, collapse = " || ", FUN.VALUE = character(1)))
+
+all_pairs <- emmeans::contrast(cell_emm, method = contrast_list, adjust = "tukey") %>%
+  as.data.frame() %>%
+  transmute(pair = contrast, p_value = p.value)
+
+comparison_results <- tibble(
+  group1 = c("Juxta Control", "Non Juxta Control", "Juxta Control", "Juxta TTX"),
+  group2 = c("Juxta TTX", "Non Juxta TTX", "Non Juxta Control", "Non Juxta TTX")
+) %>%
+  rowwise() %>%
+  mutate(
+    direct_pair = paste(group1, group2, sep = " || "),
+    reverse_pair = paste(group2, group1, sep = " || "),
+    p_value = {
+      matched <- all_pairs$p_value[
+        all_pairs$pair %in% c(direct_pair, reverse_pair)
+      ]
+      if (length(matched) != 1) stop("Tukey comparison not found: ", group1, " vs ", group2)
+      matched
+    }
+  ) %>%
+  ungroup() %>%
+  select(group1, group2, p_value)
+
+group_means <- setNames(summary_table$`Mean (SE)`, as.character(summary_table$Group))
+
+stats_table <- comparison_results %>%
+  transmute(
+    Test = "Three-way ANOVA with Tukey post hoc",
+    Comparison = paste(group1, "vs", group2),
+    `Group 1 mean (SE)` = unname(group_means[group1]),
+    `Group 2 mean (SE)` = unname(group_means[group2]),
+    `Condition p` = format_p(aov_tab["Condition", "Pr(>F)"]),
+    `Region p` = format_p(aov_tab["Region", "Pr(>F)"]),
+    `Condition x Region p` = format_p(aov_tab["Condition:Region", "Pr(>F)"]),
+    `Tukey p` = format_p(p_value)
+  )
+
+stats_table
+```
+
+## Plot
+
+```{r fig-6d-plot, fig.width=30, fig.height=20}
+set.seed(20261109)
+date_levels <- levels(mito_df$Date)
+group_date_colors <- c(
+  setNames(rep(c("#1A1A1A", "#4D4D4D", "#777B7E"), length.out = length(date_levels)),
+           paste("Juxta Control", date_levels, sep = "_")),
+  setNames(rep(c("#003D00", "#008000", "#3A9D23"), length.out = length(date_levels)),
+           paste("Juxta TTX", date_levels, sep = "_")),
+  setNames(rep(c("#9E9E9E", "#BDBDBD", "#D9D9D9"), length.out = length(date_levels)),
+           paste("Non Juxta Control", date_levels, sep = "_")),
+  setNames(rep(c("#001800", "#003D00", "#18500F"), length.out = length(date_levels)),
+           paste("Non Juxta TTX", date_levels, sep = "_"))
+)
+
+plot_stats <- comparison_results %>%
+  filter(group1 == "Juxta Control", group2 == "Non Juxta Control") %>%
+  mutate(
+    group1_x = unname(spacing_map[group1]),
+    group2_x = unname(spacing_map[group2]),
+    y_position = 1.5,
+    stars = p_to_stars(p_value)
+  ) %>%
+  filter(stars != "ns")
+
+fig6d_plot <- ggplot(mito_df, aes(x_pos, mito_area_um2, color = Group_Date)) +
+  ggbeeswarm::geom_beeswarm(cex = 3, priority = "random", size = 15, corral = "random") +
+  geom_boxplot(aes(group = x_pos), fill = NA, width = 1, outlier.shape = NA,
+               linewidth = 2, color = "black") +
+  stat_summary(aes(group = x_pos), fun = mean, geom = "point",
+               shape = 15, size = 20, color = "black") +
+  geom_segment(data = plot_stats,
+               aes(x = group1_x, xend = group2_x,
+                   y = y_position, yend = y_position),
+               inherit.aes = FALSE, linewidth = 2, color = "black") +
+  geom_text(data = plot_stats,
+            aes(x = (group1_x + group2_x) / 2,
+                y = y_position + 0.05, label = stars),
+            inherit.aes = FALSE, size = 25, color = "black") +
+  scale_x_continuous(
+    breaks = unname(spacing_map),
+    labels = c("control", "homeostatic\nplasticity",
+               "control", "homeostatic\nplasticity")
+  ) +
+  scale_color_manual(values = group_date_colors) +
+  scale_y_continuous(oob = scales::oob_keep, breaks = c(0, 0.5, 1, 1.5),
+                     limits = c(0, 1.8), expand = c(0, 0)) +
+  labs(x = NULL, y = expression(mean~mito~area~group("(", mu*m^2, ")"))) +
+  theme_classic() +
+  theme(
+    axis.title = element_text(size = 80, color = "black"),
+    axis.text = element_text(size = 80, color = "black"),
+    axis.ticks = element_line(linewidth = 5, color = "black"),
+    axis.ticks.length = grid::unit(0.5, "cm"),
+    axis.line = element_line(linewidth = 2, color = "black"),
+    legend.position = "none"
+  )
+
+fig6d_plot
+```
+
+```{r fig-6d-save, include=FALSE}
+dir.create("./Graphs", recursive = TRUE, showWarnings = FALSE)
+output_file <- "./Graphs/Fig 6D.png"
+ggsave(output_file, fig6d_plot, width = 30, height = 20, units = "in", dpi = 300)
+tibble(Figure = "Fig 6D", File = output_file)
+```
+
+# Fig 6E
+
+Mitochondrial ATP reporter L/F by region and homeostatic-plasticity treatment in Matrix-PKI-expressing neurons.
+
+**update for 2026 pending** — The adjusted juxtaspinal treatment contrast is significant, whereas the overall treatment effect is nonsignificant.
+
+**Source data**  
+`Fig 6E.csv`
+
+**Columns**
+
+- `Date` — Experiment date
+- `Condition` — Control or TTX
+- `Dish` — Culture dish ID
+- `Cell` — Cell ID
+- `FOV` — Field of view ID
+- `Mito` — Mitochondrial region ID
+- `Slice` — Image slice ID
+- `L` — Luciferase luminescence
+- `F` — Reporter fluorescence
+- `LbyF` — Luminescence-to-fluorescence ratio (L/F)
+- `region` — Juxtaspinal or non-juxtaspinal region
+
+## Data
+
+All cells express Matrix-PKI.
+
+```{r fig-6e-data}
+PLOT_CORRECTED <- TRUE
+pH_control <- 7.05
+pH_scaling <- 6.98
+pKa_L <- 7.03
+L_corr_factor <- (1 + 10^(pKa_L - pH_scaling)) /
+  (1 + 10^(pKa_L - pH_control))
+plot_y <- if (PLOT_CORRECTED) "LbyF_corrected" else "LbyF"
+
+spacing_map <- c(
+  "Juxta Control" = 1, "Juxta TTX" = 2.2,
+  "Non Juxta Control" = 3.8, "Non Juxta TTX" = 5
+)
+
+LbyF_df <- read_csv("./Fig 6E.csv", show_col_types = FALSE)
+required_columns <- c("Date", "Condition", "region", "Cell", "Mito", "LbyF", "L", "F")
+missing_columns <- setdiff(required_columns, names(LbyF_df))
+if (length(missing_columns))
+  stop("Missing columns: ", paste(missing_columns, collapse = ", "))
+
+if (!"Dish" %in% names(LbyF_df)) LbyF_df$Dish <- "1"
+if (!"FOV" %in% names(LbyF_df)) LbyF_df$FOV <- 1
+
+LbyF_df <- LbyF_df %>%
+  mutate(
+    Condition = trimws(as.character(Condition)),
+    Region = trimws(as.character(region)),
+    Region = case_when(
+      grepl("^Juxta$", Region, ignore.case = TRUE) ~ "Juxta",
+      grepl("^Non[ _-]*Juxta$", Region, ignore.case = TRUE) ~ "Non Juxta",
+      TRUE ~ Region
+    )
+  ) %>%
+  filter(
+    grepl("Matrix-PKI|Matrix PKI|MitoPKI|Mt-PKI", Condition, ignore.case = TRUE) |
+      Condition %in% c("Control", "TTX")
+  ) %>%
+  mutate(
+    Condition = case_when(
+      grepl("^Control", Condition, ignore.case = TRUE) ~ "Control",
+      grepl("^TTX", Condition, ignore.case = TRUE) ~ "TTX"
+    ),
+    Date = factor(trimws(as.character(Date))),
+    Condition = factor(Condition, levels = c("Control", "TTX")),
+    Region = factor(Region, levels = c("Juxta", "Non Juxta")),
+    Dish = as.character(Dish),
+    Cell = as.character(Cell),
+    Mito = as.character(Mito),
+    FOV = as.integer(coalesce(suppressWarnings(as.numeric(FOV)), 1)),
+    across(c(LbyF, L, F), as.numeric)
+  ) %>%
+  filter(
+    !is.na(Date), !is.na(Condition), !is.na(Region),
+    is.finite(LbyF), is.finite(L), is.finite(F), L > 0, F > 500
+  ) %>%
+  mutate(
+    L_corrected = if_else(Condition == "TTX", L * L_corr_factor, L),
+    LbyF_corrected = L_corrected / F,
+    Group = factor(paste(Region, Condition), levels = names(spacing_map)),
+    x_pos = unname(spacing_map[as.character(Group)]),
+    Group_Date = paste(Group, Date, sep = "_"),
+    Cell_ID = paste(Date, Group, Dish, Cell, sep = "_"),
+    Mito_ID = paste(Date, Group, Dish, Cell, FOV, Mito, sep = "_")
+  ) %>%
+  filter(is.finite(.data[[plot_y]]))
+
+if (!nrow(LbyF_df) || n_distinct(LbyF_df$Group) < 4 || n_distinct(LbyF_df$Date) < 2)
+  stop("All four Condition x Region groups and at least two dates are required.")
+
+LbyF_df %>%
+  select(Date, Condition, Dish, Cell, FOV, Mito, Region,
+         LbyF, L, F, L_corrected, LbyF_corrected) %>%
+  mutate(across(where(is.numeric), ~ round(.x, 3)))
+```
+
+## Summary
+
+```{r fig-6e-summary}
+summary_table <- LbyF_df %>%
+  group_by(Group) %>%
+  summarise(
+    n_Experiment_Dates = n_distinct(Date),
+    n_Cells = n_distinct(Cell_ID),
+    n_FOVs = n_distinct(Date, Dish, Cell, FOV),
+    n_Mitochondria = n_distinct(Mito_ID),
+    `Mean (SE)` = sprintf("%.3f (%.3f)", mean(.data[[plot_y]]),
+                          sd(.data[[plot_y]]) / sqrt(n())),
+    .groups = "drop"
+  )
+
+summary_table
+```
+
+## Statistics
+
+Three-way ANOVA with condition, region, experiment date, and their interactions (Type I sums of squares). Pairwise comparisons use Tukey adjustment.
+
+```{r fig-6e-statistics}
+format_p <- function(p) ifelse(is.na(p), NA_character_,
+                               ifelse(p < 0.0001, "<0.0001", sprintf("%.4f", p)))
+p_to_stars <- function(p) case_when(
+  is.na(p) ~ NA_character_, p < 0.001 ~ "***",
+  p < 0.01 ~ "**", p < 0.05 ~ "*", TRUE ~ "ns"
+)
+
+fit_aov <- aov(
+  as.formula(paste(plot_y, "~ Condition * Region * Date")),
+  data = LbyF_df
+)
+aov_tab <- anova(fit_aov)
+
+anova_table <- as.data.frame(aov_tab) %>%
+  tibble::rownames_to_column("Effect") %>%
+  filter(trimws(Effect) != "Residuals") %>%
+  transmute(
+    Effect = dplyr::recode(
+      trimws(Effect),
+      Condition = "Condition", Region = "Region", Date = "Date",
+      `Condition:Region` = "Condition x Region",
+      `Condition:Date` = "Condition x Date",
+      `Region:Date` = "Region x Date",
+      `Condition:Region:Date` = "Condition x Region x Date"
+    ),
+    df = Df, F = round(`F value`, 3), `p value` = format_p(`Pr(>F)`)
+  )
+
+anova_table
+
+cell_emm <- emmeans::emmeans(fit_aov, ~ Region * Condition)
+cell_means <- as.data.frame(cell_emm) %>%
+  mutate(Group = paste(Region, Condition))
+
+pair_list <- combn(cell_means$Group, 2, simplify = FALSE)
+contrast_list <- setNames(lapply(pair_list, function(pair) {
+  contrast_vector <- rep(0, nrow(cell_means))
+  contrast_vector[match(pair[1], cell_means$Group)] <- 1
+  contrast_vector[match(pair[2], cell_means$Group)] <- -1
+  contrast_vector
+}), vapply(pair_list, paste, collapse = " || ", FUN.VALUE = character(1)))
+
+all_pairs <- emmeans::contrast(cell_emm, method = contrast_list, adjust = "tukey") %>%
+  as.data.frame() %>%
+  transmute(pair = contrast, p_value = p.value)
+
+comparison_results <- tibble(
+  group1 = c("Juxta Control", "Non Juxta Control", "Juxta Control", "Juxta TTX"),
+  group2 = c("Juxta TTX", "Non Juxta TTX", "Non Juxta Control", "Non Juxta TTX")
+) %>%
+  rowwise() %>%
+  mutate(
+    direct_pair = paste(group1, group2, sep = " || "),
+    reverse_pair = paste(group2, group1, sep = " || "),
+    p_value = {
+      matched <- all_pairs$p_value[
+        all_pairs$pair %in% c(direct_pair, reverse_pair)
+      ]
+      if (length(matched) != 1) stop("Tukey comparison not found: ", group1, " vs ", group2)
+      matched
+    }
+  ) %>%
+  ungroup() %>%
+  select(group1, group2, p_value)
+
+group_means <- setNames(summary_table$`Mean (SE)`, as.character(summary_table$Group))
+
+stats_table <- comparison_results %>%
+  transmute(
+    Test = "Three-way ANOVA with Tukey post hoc",
+    Comparison = paste(group1, "vs", group2),
+    `Group 1 mean (SE)` = unname(group_means[group1]),
+    `Group 2 mean (SE)` = unname(group_means[group2]),
+    `Condition p` = format_p(aov_tab["Condition", "Pr(>F)"]),
+    `Region p` = format_p(aov_tab["Region", "Pr(>F)"]),
+    `Condition x Region p` = format_p(aov_tab["Condition:Region", "Pr(>F)"]),
+    `Tukey p` = format_p(p_value)
+  )
+
+stats_table
+```
+
+## Plot
+
+```{r fig-6e-plot, fig.width=30, fig.height=20}
+set.seed(20261109)
+date_levels <- levels(LbyF_df$Date)
+group_date_colors <- c(
+  setNames(rep(c("#1A1A1A", "#4D4D4D", "#777B7E"), length.out = length(date_levels)), paste("Juxta Control", date_levels, sep = "_")),
+  setNames(rep(c("#8F3F12", "#C26018", "#E88A16"), length.out = length(date_levels)), paste("Juxta TTX", date_levels, sep = "_")),
+  setNames(rep(c("#BDBDBD", "#D9D9D9", "#9E9E9E"), length.out = length(date_levels)), paste("Non Juxta Control", date_levels, sep = "_")),
+  setNames(rep(c("#6B3518", "#8C4A24", "#A66A2C"), length.out = length(date_levels)), paste("Non Juxta TTX", date_levels, sep = "_"))
+)
+
+plot_stats <- comparison_results %>%
+  filter(group1 == "Juxta Control", group2 == "Juxta TTX") %>%
+  mutate(
+    group1_x = unname(spacing_map[group1]),
+    group2_x = unname(spacing_map[group2]),
+    y_position = 0.205,
+    stars = p_to_stars(p_value)
+  ) %>%
+  filter(stars != "ns")
+
+fig6e_plot <- ggplot(LbyF_df, aes(x_pos, .data[[plot_y]], color = Group_Date)) +
+  ggbeeswarm::geom_beeswarm(cex = 2, priority = "random", size = 12, corral = "random") +
+  geom_boxplot(aes(group = x_pos), fill = NA, width = 1, outlier.shape = NA,
+               linewidth = 2, color = "black") +
+  stat_summary(aes(group = x_pos), fun = mean, geom = "point",
+               shape = 15, size = 15, color = "black") +
+  geom_segment(
+    data = plot_stats,
+    aes(x = group1_x, xend = group2_x, y = y_position, yend = y_position),
+    inherit.aes = FALSE, linewidth = 2, color = "black"
+  ) +
+  geom_text(
+    data = plot_stats,
+    aes(x = (group1_x + group2_x) / 2, y = y_position + 0.008, label = stars),
+    inherit.aes = FALSE, size = 25, color = "black"
+  ) +
+  scale_x_continuous(
+    breaks = unname(spacing_map),
+    labels = c("control", "homeostatic\nplasticity",
+               "control", "homeostatic\nplasticity")
+  ) +
+  scale_color_manual(values = group_date_colors) +
+  scale_y_continuous(oob = scales::oob_keep, 
+    breaks = c(0, 0.1, 0.2),
+    limits = c(0, 0.23), expand = c(0, 0)
+  ) +
+  labs(x = NULL, y = expression(ATP[mito]~"(L/F)")) +
+  theme_classic() +
+  theme(
+    axis.title = element_text(size = 80, color = "black"),
+    axis.text.x = element_text(size = 80, color = "black"),
+    axis.text.y = element_text(size = 80, color = "black"),
+    axis.ticks = element_line(linewidth = 5, color = "black"),
+    axis.ticks.length = grid::unit(0.5, "cm"),
+    axis.line = element_line(linewidth = 2, color = "black"),
+    legend.position = "none"
+  )
+
+fig6e_plot
+```
+
+```{r fig-6e-save, include=FALSE}
+dir.create("./Graphs", recursive = TRUE, showWarnings = FALSE)
+output_file <- "./Graphs/Fig 6E.png"
+ggsave(output_file, fig6e_plot, width = 30, height = 20, units = "in", dpi = 300)
+tibble(Figure = "Fig 6E", File = output_file)
+```
+
+# Fig 6F
+
+Juxtaspinal mitochondrial area after single-spine plasticity induction in control and Matrix-PKI neurons.
+
+**Source data**  
+`Fig 6F.csv`
+
+**Columns**
+
+- `Date` — Experiment date
+- `Condition` — Control or Matrix-PKI
+- `Dish` — Culture dish ID
+- `Cell` — Cell ID
+- `Spine` — Spine ID
+- `Time` — Time relative to induction (min)
+- `mito_area_um2` — Mitochondrial area (µm²)
+- `norm_mito_area_um2` — Baseline-normalized mitochondrial area (unitless)
+
+## Data
+
+Baseline-normalized area is averaged across the ten measurements from 17 to 62 min per complete trace.
+
+```{r fig-6f-data}
+condition_order <- c("Control", "Matrix-PKI")
+condition_colors <- c("Control" = "#00DC00", "Matrix-PKI" = "#008000")
+X_BREAKS <- c(-2, 2, 12, 22, 32, 42, 52, 62)
+
+Mito <- read_csv("./Fig 6F.csv", show_col_types = FALSE) %>%
+  mutate(
+    Condition = if_else(Condition == "Matrix PKI", "Matrix-PKI", Condition),
+    Condition = factor(Condition, levels = condition_order),
+    Date = trimws(as.character(Date)),
+    across(c(Dish, Cell, Spine, Time, mito_area_um2, norm_mito_area_um2), as.numeric)
+  ) %>%
+  filter(!is.na(Condition), !is.na(Date), Date != "", is.finite(Time))
+
+time_levels <- sort(unique(Mito$Time))
+if (length(time_levels) < 16) stop("At least 16 ordered time points are required.")
+
+Mito %>% mutate(across(where(is.numeric), ~ round(.x, 3)))
+```
+
+## Summary
+
+```{r fig-6f-summary}
+summary_table <- Mito %>%
+  group_by(Condition) %>%
+  summarise(
+    n_Spines = n_distinct(paste(Condition, Date, Dish, Cell, Spine, sep = "_")),
+    n_Cells = n_distinct(paste(Date, Dish, Cell, sep = "_")),
+    n_Biological_Replicates = n_distinct(case_when(
+      Condition == "Control" & Date %in% c("2026-05-06", "2026-05-08") ~ "2026-05-06",
+      Condition == "Control" & Date %in% c("2026-06-10", "2026-06-12") ~ "2026-06-10",
+      Condition == "Matrix-PKI" & Date %in% c("2026-06-10", "2026-06-11") ~ "2026-06-10",
+      Condition == "Matrix-PKI" & Date %in% c("2026-06-17", "2026-06-18") ~ "2026-06-17",
+      TRUE ~ Date
+    )),
+    .groups = "drop"
+  )
+
+summary_table
+```
+
+## Statistics
+
+One-way ANOVA if both groups pass Shapiro–Wilk (p > 0.05), otherwise Kruskal–Wallis.
+
+```{r fig-6f-statistics}
+comparison_times <- time_levels[7:16]
+format_p <- function(p) ifelse(p < 0.0001, "<0.0001", sprintf("%.4f", p))
+p_to_stars <- function(p) case_when(p < 0.001 ~ "***", p < 0.01 ~ "**", p < 0.05 ~ "*", TRUE ~ "ns")
+
+norm_compare <- Mito %>%
+  mutate(time_order = match(Time, time_levels),
+         TraceID = paste(Condition, Date, Dish, Cell, Spine, sep = "_")) %>%
+  filter(time_order %in% 7:16, is.finite(norm_mito_area_um2)) %>%
+  group_by(Condition, TraceID) %>%
+  summarise(value = mean(norm_mito_area_um2), n_timepoints = n_distinct(time_order), .groups = "drop") %>%
+  filter(n_timepoints == length(comparison_times))
+
+if (n_distinct(norm_compare$Condition) < 2)
+  stop("Both Control and Matrix-PKI need complete spines for this comparison.")
+
+safe_shapiro <- function(x) {
+  if (length(x) < 3 || length(x) > 5000 || sd(x) == 0) return(NA_real_)
+  shapiro.test(x)$p.value
+}
+
+normality <- norm_compare %>% group_by(Condition) %>%
+  summarise(Shapiro_p = safe_shapiro(value), Normal = !is.na(Shapiro_p) & Shapiro_p > 0.05, .groups = "drop")
+
+normality
+
+if (all(normality$Normal)) {
+  norm_fit <- aov(value ~ Condition, data = norm_compare)
+  norm_test <- "One-way ANOVA"
+  norm_p <- as.numeric(anova(norm_fit)["Condition", "Pr(>F)"])
+} else {
+  norm_fit <- kruskal.test(value ~ Condition, data = norm_compare)
+  norm_test <- "Kruskal-Wallis"
+  norm_p <- norm_fit$p.value
+}
+
+norm_means <- norm_compare %>% group_by(Condition) %>%
+  summarise(`Mean (SE)` = sprintf("%.3f (%.3f)", mean(value), sd(value) / sqrt(n())), .groups = "drop")
+mean_lookup <- setNames(norm_means$`Mean (SE)`, as.character(norm_means$Condition))
+
+stats_table <- tibble(
+  Test = norm_test,
+  Statistic = if (inherits(norm_fit,"htest")) unname(norm_fit$statistic) else anova(norm_fit)$`F value`[1],
+  df1 = if (inherits(norm_fit,"htest")) unname(norm_fit$parameter) else anova(norm_fit)$Df[1],
+  df2 = if (inherits(norm_fit,"htest")) NA_real_ else anova(norm_fit)$Df[2],
+  Comparison = "Control vs Matrix-PKI",
+  `Time range` = paste0(min(comparison_times), "-", max(comparison_times)),
+  `Control mean (SE)` = unname(mean_lookup["Control"]),
+  `Matrix-PKI mean (SE)` = unname(mean_lookup["Matrix-PKI"]),
+  `p value` = format_p(norm_p)
+)
+
+stats_table
+```
+
+## Plot
+
+The red bar marks single-spine induction from 0 to 2 min.
+
+```{r fig-6f-plot, fig.width=30, fig.height=20}
+set.seed(20261109)
+norm_summary <- Mito %>%
+  mutate(time_order = match(Time, time_levels)) %>%
+  filter(is.finite(norm_mito_area_um2)) %>%
+  group_by(Condition, Time, time_order) %>%
+  summarise(mean_value = mean(norm_mito_area_um2),
+            sem = sd(norm_mito_area_um2) / sqrt(n()), .groups = "drop")
+
+errorbars <- norm_summary %>% filter(time_order %% 2 == 0, is.finite(sem))
+plot_stats <- tibble(
+  x_start = min(comparison_times), x_end = max(comparison_times),
+  x_label = (x_start + x_end) / 2, stars = p_to_stars(norm_p)
+) %>% filter(stars != "ns")
+
+norm_plot <- ggplot(norm_summary, aes(Time, mean_value, color = Condition, group = Condition)) +
+  geom_hline(yintercept = 1, color = "grey50", linetype = "dashed", linewidth = 3) +
+  geom_line(linewidth = 5) +
+  geom_point(size = 20) +
+  geom_errorbar(data = errorbars, aes(ymin = mean_value - sem, ymax = mean_value + sem),
+                width = 0.6, linewidth = 4) +
+  geom_segment(data = plot_stats, aes(x = x_start, xend = x_end, y = 1.2, yend = 1.2),
+               inherit.aes = FALSE, color = "black", linewidth = 3) +
+  geom_text(data = plot_stats, aes(x = x_label, y = 1.21, label = stars),
+            inherit.aes = FALSE, color = "black", size = 28) +
+  scale_color_manual(values = condition_colors, breaks = condition_order) +
+  scale_x_continuous(breaks = X_BREAKS, expand = expansion(add = c(1, 1))) +
+  scale_y_continuous(oob = scales::oob_keep, limits = c(0.95, 1.225), breaks = c(1.0, 1.1, 1.2), expand = c(0, 0)) +
+  labs(x = NULL, y = "norm. mito area") +
+  annotate("segment",x=0,xend=2,y=1.22,yend=1.22,color="#D00000",linewidth=6) +
+  theme_classic() +
+  theme(axis.title = element_text(size = 80, color = "black"),
+        axis.text = element_text(size = 80, color = "black"),
+        axis.ticks = element_line(linewidth = 5, color = "black"),
+        axis.ticks.length = grid::unit(0.5, "cm"),
+        axis.line = element_line(linewidth = 2, color = "black"),
+        legend.position = "bottom", legend.text = element_text(size=30), legend.title = element_blank())
+
+norm_plot
+```
+
+```{r fig-6f-save, include=FALSE}
+dir.create("./Graphs", recursive = TRUE, showWarnings = FALSE)
+output_file <- "./Graphs/Fig 6F.png"
+ggsave(output_file, norm_plot, width = 30, height = 20, units = "in", dpi = 300)
+tibble(Figure = "Fig 6F", File = output_file)
+```
+
+# Fig 6G
+
+pH-corrected juxtaspinal mitochondrial ATP following single-spine plasticity induction in control and Matrix-PKI neurons.
+
+**update for 2026 pending** — Matrix-PKI has four experiment dates. The v3 legend reports three biological replicates.
+
+**Source data**  
+`Fig 6G.csv`, `Fig 6G pH.csv`
+
+**Columns**
+
+- `Date` — Experiment date
+- `Condition` — Control or Matrix-PKI
+- `Dish` — Culture dish ID
+- `Cell` — Cell ID
+- `Mito` — Mitochondrial region ID
+- `Timepoint` — Sampling index
+- `Time` — Time relative to induction (min)
+- `LbyF` — Luminescence-to-fluorescence ratio (L/F)
+- `Control` — Mean mitochondrial pH in control neurons
+- `Control_SE` — SE of the corresponding mean pH
+- `PKI` — Mean mitochondrial pH in Matrix-PKI neurons
+- `PKI_SE` — SE of the corresponding mean pH
+
+## Data
+
+Each trace is corrected with the corresponding group mean pH trace (pKa 7.03) and normalized to its first nine valid observations.
+
+```{r fig-6g-data}
+input_csv <- "./Fig 6G.csv"
+ph_csv <- "./Fig 6G pH.csv"
+condition_order <- c("Control", "PKI")
+condition_colors <- c("Control" = "#FC6A03", "PKI" = "#6B3518")
+X_BREAKS <- c(-2, 0, 2, 4, 6, 8, 10, 12)
+N_BASELINE_POINTS <- 9; PKA_L <- 7.03
+
+Mito <- read_csv(input_csv, show_col_types = FALSE) %>%
+  mutate(
+    Date = trimws(as.character(Date)),
+    Condition = trimws(as.character(Condition)),
+    across(c(Dish, Cell, Mito, Timepoint, Time, LbyF), as.numeric),
+    TraceID = paste(Date, Condition, Dish, Cell, Mito, sep = "_")
+  ) %>%
+  filter(Condition %in% condition_order, !is.na(Date), Date != "",
+         is.finite(Timepoint), is.finite(Time), is.finite(LbyF)) %>%
+  mutate(Condition = factor(Condition, levels = condition_order))
+
+pH <- read_csv(ph_csv, show_col_types = FALSE)
+missing_columns <- setdiff(c("Control", "PKI"), names(pH))
+if (length(missing_columns)) stop("Missing pH columns: ", paste(missing_columns, collapse = ", "))
+if (nrow(pH) < max(Mito$Timepoint)) stop("The pH file has fewer rows than the ATP data have time points.")
+
+pH <- pH %>%
+  transmute(Timepoint = row_number(), Control_pH = as.numeric(Control),
+            PKI_pH = as.numeric(PKI))
+if (any(!is.finite(pH$Control_pH[seq_len(max(Mito$Timepoint))])) ||
+    any(!is.finite(pH$PKI_pH[seq_len(max(Mito$Timepoint))])))
+  stop("The pH file contains missing or nonnumeric values within the ATP time range.")
+
+control_baseline_pH <- mean(pH$Control_pH[seq_len(N_BASELINE_POINTS)])
+pki_baseline_pH <- mean(pH$PKI_pH[seq_len(N_BASELINE_POINTS)])
+pH <- pH %>%
+  mutate(
+    Control_factor = (1 + 10^(PKA_L - Control_pH)) /
+      (1 + 10^(PKA_L - control_baseline_pH)),
+    PKI_factor = (1 + 10^(PKA_L - PKI_pH)) /
+      (1 + 10^(PKA_L - pki_baseline_pH))
+  )
+
+Mito <- Mito %>%
+  left_join(pH, by = "Timepoint") %>%
+  mutate(
+    pH_value = if_else(Condition == "Control", Control_pH, PKI_pH),
+    pH_factor = if_else(Condition == "Control", Control_factor, PKI_factor),
+    raw_value = LbyF * pH_factor
+  )
+
+if (any(!is.finite(Mito$raw_value))) stop("The pH correction produced nonfinite L/F values.")
+
+baseline_table <- Mito %>%
+  filter(Timepoint <= N_BASELINE_POINTS) %>%
+  group_by(Condition, TraceID) %>%
+  summarise(Baseline = mean(raw_value), n_baseline = n_distinct(Timepoint), .groups = "drop") %>%
+  filter(n_baseline == N_BASELINE_POINTS, is.finite(Baseline), Baseline != 0) %>%
+  select(-n_baseline)
+
+Mito <- Mito %>%
+  inner_join(baseline_table, by = c("Condition", "TraceID")) %>%
+  mutate(norm_LbyF = raw_value / Baseline)
+
+if (nrow(Mito) == 0) stop("No traces have nine valid baseline points.")
+
+Mito %>%
+  select(Date, Condition, Dish, Cell, Mito, Timepoint, Time, LbyF,
+         pH_value, pH_factor, raw_value, norm_LbyF) %>%
+  mutate(across(where(is.numeric), ~ round(.x, 3)))
+```
+
+## Summary
+
+```{r fig-6g-summary}
+summary_table <- Mito %>%
+  group_by(Condition) %>%
+  summarise(
+    n_Mitochondria = n_distinct(TraceID),
+    n_Cells = n_distinct(Date, Dish, Cell),
+    n_Experiment_Dates = n_distinct(Date),
+    .groups = "drop"
+  )
+
+summary_table
+```
+
+## Statistics
+
+Separate one-way ANOVAs with Tukey comparisons at 2 min and on trace means over 6–12 min.
+
+```{r fig-6g-statistics}
+window_data <- bind_rows(
+  Mito %>% filter(abs(Time - 2) < 1e-4) %>% mutate(Window="2 min"),
+  Mito %>% filter(Time >= 6 - 1e-4, Time <= 12 + 1e-4) %>% mutate(Window="6-12 min")
+) %>% group_by(Condition, TraceID, Window) %>%
+  summarise(value=mean(norm_LbyF), n_timepoints=n_distinct(Timepoint), .groups="drop")
+expected_late <- n_distinct(Mito$Timepoint[Mito$Time >= 6 - 1e-4 & Mito$Time <= 12 + 1e-4])
+window_data <- window_data %>% filter((Window=="2 min" & n_timepoints==1) |
+                                       (Window=="6-12 min" & n_timepoints==expected_late))
+window_summary <- window_data %>% group_by(Window,Condition) %>%
+  summarise(n_Traces=n(),Mean=mean(value),SE=sd(value)/sqrt(n()),.groups="drop")
+window_summary
+stats_table <- bind_rows(lapply(c("2 min","6-12 min"),function(w) {
+  d <- filter(window_data,Window==w)
+  if (any(table(d$Condition)<2)) stop("At least two complete traces per condition are required.")
+  fit <- aov(value ~ Condition,data=d)
+  contrast <- as.data.frame(emmeans::contrast(emmeans::emmeans(fit,~Condition),
+                                             "pairwise",adjust="tukey"))
+  tab <- anova(fit)
+  tibble(Window=w,Test="One-way ANOVA; Tukey comparison",Comparison="Control vs Matrix-PKI",
+         df1=tab$Df[1],df2=tab$Df[2],F=tab$`F value`[1],
+         Difference=contrast$estimate,SE_difference=contrast$SE,
+         ANOVA_p=tab$`Pr(>F)`[1],Tukey_p=contrast$p.value)
+}))
+stats_table
+```
+
+## Plot
+
+The red bar marks single-spine induction from 0 to 2 min.
+
+```{r fig-6g-plot, fig.width=30, fig.height=20}
+set.seed(20261109)
+norm_summary <- Mito %>%
+  group_by(Condition, Timepoint, Time) %>%
+  summarise(
+    mean_value = mean(norm_LbyF),
+    sem = if (n() < 2) NA_real_ else sd(norm_LbyF) / sqrt(n()),
+    .groups = "drop"
+  )
+
+errorbars <- norm_summary %>%
+  filter(Timepoint %in% c(3, 9, 10) |
+           round(Time, 6) %in% c(4, 6, 8, 10, 12)) %>%
+  filter(is.finite(sem))
+
+plot_comparisons <- stats_table %>% mutate(
+  stars=case_when(Tukey_p < 0.001 ~ "***",Tukey_p < 0.01 ~ "**",Tukey_p < 0.05 ~ "*",TRUE ~ "ns"))
+point_stars <- filter(plot_comparisons,Window=="2 min",Tukey_p < 0.05)
+late_stars <- filter(plot_comparisons,Window=="6-12 min",Tukey_p < 0.05)
+x_limits <- c(min(Mito$Time), max(Mito$Time) + 0.5)
+
+norm_plot <- ggplot(norm_summary, aes(Time, mean_value, color = Condition, group = Condition)) +
+  geom_hline(yintercept = 1, color = "grey50", linetype = "dashed", linewidth = 3) +
+  geom_line(linewidth = 5) +
+  geom_point(size = 12) +
+  geom_errorbar(data = errorbars, aes(ymin = mean_value - sem, ymax = mean_value + sem),
+                width = 0.2, linewidth = 4) +
+  geom_text(data=point_stars,aes(x=2,y=2.25,label=stars),inherit.aes=FALSE,color="black",size=20) +
+  geom_segment(data=late_stars,aes(x=6,xend=12,y=2.2,yend=2.2),inherit.aes=FALSE,color="black",linewidth=3) +
+  geom_text(data=late_stars,aes(x=9,y=2.25,label=stars),inherit.aes=FALSE,color="black",size=20) +
+  scale_color_manual(values = condition_colors, breaks = condition_order, labels = c("control", "Matrix-PKI")) +
+  scale_x_continuous(oob = scales::oob_keep, breaks = X_BREAKS, limits = x_limits, expand = c(0, 0)) +
+  scale_y_continuous(oob = scales::oob_keep, limits = c(0.5, 2.5), breaks = c(0.6,1, 1.4, 1.8, 2.2), expand = c(0, 0)) +
+  labs(x = "Time (minutes)", y = "normalized pH-corrected L/F") +
+  annotate("segment",x=0,xend=2,y=2.45,yend=2.45,color="#D00000",linewidth=6) +
+  theme_classic() +
+  theme(axis.title = element_text(size = 60, color = "black"),
+        axis.text = element_text(size = 60, color = "black"),
+        axis.ticks = element_line(linewidth = 4, color = "black"),
+        axis.ticks.length = grid::unit(0.4, "cm"),
+        axis.line = element_line(linewidth = 2, color = "black"),
+        legend.position = "bottom", legend.text = element_text(size=30), legend.title = element_blank())
+
+norm_plot
+```
+
+```{r fig-6g-save, include=FALSE}
+dir.create("./Graphs", recursive = TRUE, showWarnings = FALSE)
+output_file <- "./Graphs/Fig 6G.png"
+ggsave(output_file, norm_plot, width = 30, height = 20, units = "in", dpi = 300)
+tibble(Figure = "Fig 6G", File = output_file)
+```
+
+# Fig 6H
+
+Normalized spine size after single-spine plasticity induction in control and Matrix-PKI neurons.
+
+**update for 2026 pending** — Biological replicate IDs are unavailable for the spine traces.
+
+**Source data**  
+`Fig 6H.csv`
+
+**Columns**
+
+- `Condition` — Control or Matrix-PKI
+- `Spine` — Spine ID
+- `time_min` — Time relative to induction (min)
+- `normalized_fwhm` — Baseline-normalized spine full width at half maximum
+
+## Data
+
+The long-format CSV contains the measured values from the Control and Matrix-PKI workbook sheets.
+
+```{r fig-6h-data}
+input_file <- "./Fig 6H.csv"
+condition_order <- c("Control", "Matrix-PKI")
+condition_colors <- c("Control"="#C8C8C8", "Matrix-PKI"="#1A1A1A")
+anova_times <- c(17,22,27,32,37,42,47,52,57,62)
+X_BREAKS <- c(0,2,12,22,32,42,52,62)
+FWHM <- read_csv(input_file,show_col_types=FALSE) %>%
+  mutate(Condition=factor(Condition,levels=condition_order),
+         Spine=as.character(Spine),SpineID=paste(Condition,Spine,sep="_"),
+         time_min=as.numeric(time_min),normalized_fwhm=as.numeric(normalized_fwhm)) %>%
+  filter(!is.na(Condition),is.finite(time_min),is.finite(normalized_fwhm))
+if (!nrow(FWHM)) stop("No valid spine-size measurements were loaded.")
+
+FWHM %>% mutate(across(where(is.numeric), ~ round(.x, 3)))
+```
+
+## Summary
+
+```{r fig-6h-summary}
+summary_table <- FWHM %>%
+  group_by(Condition) %>%
+  summarise(n_Spines = n_distinct(SpineID), n_Timepoints = n_distinct(time_min),
+            n_Observations = n(), .groups = "drop")
+
+summary_table
+```
+
+## Statistics
+
+Mixed repeated-measures ANOVA on complete traces from 17 to 62 min (Type III sums of squares). Condition is between spines and time is within spine.
+
+```{r fig-6h-statistics}
+anova_source <- FWHM %>% filter(time_min %in% anova_times)
+time_check <- anova_source %>% group_by(Condition) %>%
+  summarise(n_Times = n_distinct(time_min), .groups = "drop")
+if (nrow(time_check) != 2 || any(time_check$n_Times != length(anova_times)))
+  stop("Both conditions must contain every selected ANOVA time point.")
+
+duplicate_rows <- anova_source %>% count(Condition, SpineID, time_min) %>% filter(n > 1)
+if (nrow(duplicate_rows)) stop("Duplicate spine measurements were found at an ANOVA time point.")
+
+complete_spines <- anova_source %>%
+  distinct(Condition, SpineID, time_min) %>%
+  count(Condition, SpineID, name = "n_Timepoints") %>%
+  filter(n_Timepoints == length(anova_times))
+
+anova_data <- anova_source %>%
+  semi_join(complete_spines, by = c("Condition", "SpineID")) %>%
+  mutate(Time = factor(time_min, levels = anova_times),
+         SpineID = factor(SpineID), Condition = factor(Condition, levels = condition_order))
+
+spine_check <- anova_data %>% group_by(Condition) %>%
+  summarise(n_Spines = n_distinct(SpineID), .groups = "drop")
+if (nrow(spine_check) != 2 || any(spine_check$n_Spines < 2))
+  stop("Each condition needs at least two complete spines.")
+
+options(contrasts = c("contr.sum", "contr.poly"))
+mixed_fit <- suppressMessages(afex::aov_ez(
+  id = "SpineID", dv = "normalized_fwhm", between = "Condition", within = "Time",
+  data = anova_data, type = 3, anova_table = list(correction = "none", es = "ges")
+))
+
+format_p <- function(p) ifelse(p < 0.0001, "<0.0001", sprintf("%.4f", p))
+p_to_stars <- function(p) case_when(p < 0.001 ~ "***", p < 0.01 ~ "**", p < 0.05 ~ "*", TRUE ~ "ns")
+anova_results <- as.data.frame(mixed_fit$anova_table) %>% tibble::rownames_to_column("Effect")
+condition_p <- as.numeric(anova_results$`Pr(>F)`[anova_results$Effect == "Condition"])
+if (length(condition_p) != 1) stop("Condition p-value was not found.")
+
+spine_check
+
+stats_table <- anova_results %>%
+  transmute(Test = "Two-way mixed repeated-measures ANOVA", Effect,
+            F = round(as.numeric(F), 3), df1 = as.numeric(`num Df`),
+            df2 = as.numeric(`den Df`), `p value` = format_p(`Pr(>F)`))
+
+stats_table
+```
+
+## Plot
+
+The red bar marks single-spine induction from 0 to 2 min.
+
+```{r fig-6h-plot, fig.width=30, fig.height=20}
+set.seed(20261109)
+plot_summary <- FWHM %>%
+  group_by(Condition, time_min) %>%
+  summarise(mean_value = mean(normalized_fwhm),
+            sem = sd(normalized_fwhm) / sqrt(n()), .groups = "drop") %>%
+  arrange(Condition, time_min) %>%
+  group_by(Condition) %>% mutate(time_order = row_number()) %>% ungroup()
+
+errorbars <- plot_summary %>% filter(time_order %% 2 == 0, is.finite(sem))
+plot_stats <- tibble(
+  x_start = min(anova_times), x_end = max(anova_times),
+  x_center = mean(anova_times), stars = p_to_stars(condition_p)
+) %>% filter(stars != "ns")
+
+fig6h_plot <- ggplot(plot_summary, aes(time_min, mean_value, color = Condition, group = Condition)) +
+  geom_hline(yintercept = 1, color = "grey50", linetype = "dashed", linewidth = 3) +
+  geom_line(linewidth = 5) +
+  geom_point(size = 20) +
+  geom_errorbar(data = errorbars, aes(ymin = mean_value - sem, ymax = mean_value + sem),
+                width = 0.6, linewidth = 4) +
+  geom_segment(data = plot_stats, aes(x = x_start, xend = x_end, y = 1.91, yend = 1.91),
+               inherit.aes = FALSE, color = "black", linewidth = 2) +
+  geom_text(data = plot_stats, aes(x = x_center, y = 1.925, label = stars),
+            inherit.aes = FALSE, color = "black", size = 30) +
+  scale_color_manual(values = condition_colors, breaks = condition_order) +
+  scale_x_continuous(oob = scales::oob_keep, breaks = X_BREAKS, limits = c(-3, 64), expand = c(0, 0)) +
+  scale_y_continuous(oob = scales::oob_keep, breaks = c(1.0, 1.4, 1.8), limits = c(0.8, 2.0), expand = c(0, 0)) +
+  labs(x = "time since plasticity induction (min)", y = "norm. spine size") +
+  annotate("segment",x=0,xend=2,y=1.98,yend=1.98,color="#D00000",linewidth=6) +
+  theme_classic() +
+  theme(axis.title = element_text(size = 80, color = "black"),
+        axis.text = element_text(size = 80, color = "black"),
+        axis.ticks = element_line(linewidth = 5, color = "black"),
+        axis.ticks.length = grid::unit(0.5, "cm"),
+        axis.line = element_line(linewidth = 2, color = "black"),
+        legend.position = "bottom", legend.text = element_text(size=30), legend.title = element_blank())
+
+fig6h_plot
+```
+
+```{r fig-6h-save, include=FALSE}
+dir.create("./Graphs", recursive = TRUE, showWarnings = FALSE)
+output_file <- "./Graphs/Fig 6H.png"
+ggsave(output_file, fig6h_plot, width = 30, height = 20, units = "in", dpi = 300)
+tibble(Figure = "Fig 6H", File = output_file)
+```

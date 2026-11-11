@@ -1,0 +1,566 @@
+---
+title: "Figure 5: ER contacts and proximal ribosomes"
+knit: (function(inputFile, encoding) { inputFile <- normalizePath(inputFile); oldwd <- setwd(dirname(inputFile)); on.exit(setwd(oldwd)); rmarkdown::render(basename(inputFile), encoding = encoding, output_file = "Fig 5.html", knit_root_dir = getwd()) })
+output:
+  html_document:
+    theme: darkly
+    highlight: breezedark
+    df_print: paged
+    toc: true
+    toc_depth: 1
+    toc_float: true
+    code_folding: hide
+    self_contained: true
+    mathjax: null
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  fig.width = 30,
+  fig.height = 20,
+  fig.retina = 1,
+  out.width = "100%",
+  fig.align = "center"
+)
+
+suppressPackageStartupMessages({
+  library(dplyr)
+  library(readr)
+  library(ggplot2)
+  library(ggbeeswarm)
+  library(ggtext)
+  library(afex)
+  library(emmeans)
+})
+
+set.seed(20261109)
+options(width = 120, dplyr.summarise.inform = FALSE)
+options(contrasts = c("contr.treatment", "contr.poly"))
+
+```
+
+# Fig 5C (top)
+
+Fraction of reconstructed ER surface assigned to mitochondria-ER contacts (MERCS).
+
+**Source data**  
+`Fig 5C.csv`
+
+**Columns**
+
+- `Date` — Experiment date
+- `Condition` — Control or TTX
+- `Mito` — Mitochondrial reconstruction ID
+- `ER_surf_um2` — Endoplasmic reticulum surface area (µm²)
+- `ERMCS_surf_um2` — Mitochondria–ER contact area (µm²)
+
+## Data
+
+The contact fraction is ERMCS surface area divided by total ER surface area.
+
+```{r fig-5c-top-data}
+condition_order <- c("Control", "TTX")
+spacing_map <- c("Control" = 1, "TTX" = 2.2)
+
+Density <- read_csv("./Fig 5C.csv", show_col_types = FALSE) %>%
+  filter(Condition %in% condition_order) %>%
+  mutate(
+    Condition = factor(Condition, levels = condition_order),
+    Date = factor(trimws(as.character(Date))),
+    across(c(ERMCS_surf_um2, ER_surf_um2), as.numeric),
+    MERCS_per_ER = ERMCS_surf_um2 / ER_surf_um2,
+    x_pos = unname(spacing_map[as.character(Condition)]),
+    color_key = paste(Condition, Date, sep = "_")
+  ) %>%
+  filter(is.finite(MERCS_per_ER), ER_surf_um2 > 0)
+
+if (nrow(Density) == 0) stop("No valid MERCS/ER measurements remain.")
+
+Density %>%
+  mutate(across(where(is.numeric), ~ round(.x, 3)))
+```
+
+## Summary
+
+```{r fig-5c-top-summary}
+summary_table <- Density %>%
+  group_by(Condition) %>%
+  summarise(
+    n_Mitochondria = n(),
+    n_Experiment_Dates = n_distinct(Date),
+    `Mean (SE)` = sprintf("%.3f (%.3f)", mean(MERCS_per_ER), sd(MERCS_per_ER) / sqrt(n())),
+    .groups = "drop"
+  )
+
+summary_table
+```
+
+## Statistics
+
+Two-way ANOVA with condition, experiment date, and their interaction (Type I sums of squares).
+
+```{r fig-5c-top-statistics}
+fit_aov <- aov(MERCS_per_ER ~ Condition * Date, data = Density)
+anova_table <- anova(fit_aov)
+condition_p <- as.numeric(anova_table["Condition", "Pr(>F)"])
+format_p <- function(p) ifelse(p < 0.0001, "<0.0001", sprintf("%.4f", p))
+
+group_means <- Density %>%
+  group_by(Condition) %>%
+  summarise(mean = mean(MERCS_per_ER), SE = sd(MERCS_per_ER) / sqrt(n()), .groups = "drop")
+
+stats_table <- tibble(
+  Test = "Two-way ANOVA",
+  Comparison = "Control vs TTX",
+  `Control mean (SE)` = sprintf("%.3f (%.3f)", group_means$mean[1], group_means$SE[1]),
+  `TTX mean (SE)` = sprintf("%.3f (%.3f)", group_means$mean[2], group_means$SE[2]),
+  `Condition p` = format_p(condition_p)
+)
+
+stats_table
+```
+
+## Plot
+
+```{r fig-5c-top-plot, fig.width=18, fig.height=14, fig.retina=1, out.width="100%", fig.align="center"}
+set.seed(20261109)
+p_to_stars <- function(p) case_when(
+  p < 0.001 ~ "***", p < 0.01 ~ "**",
+  p < 0.05 ~ "*", TRUE ~ "ns"
+)
+
+test_results <- tibble(
+  group1_x = spacing_map["Control"],
+  group2_x = spacing_map["TTX"],
+  y_position = 0.5,
+  stars = p_to_stars(condition_p)
+) %>%
+  filter(stars != "ns")
+
+date_levels <- levels(Density$Date)
+
+date_colors <- c(
+  setNames(rep(c("#1A1A1A", "#4D4D4D", "#6F7C80"), length.out = length(date_levels)),
+           paste("Control", date_levels, sep = "_")),
+  setNames(rep(c("#003B5C", "#2596D1", "#A6D9F5"), length.out = length(date_levels)),
+           paste("TTX", date_levels, sep = "_"))
+)
+
+fig5c_top_plot <- ggplot(Density, aes(x_pos, MERCS_per_ER, color = color_key)) +
+  ggbeeswarm::geom_beeswarm(cex = 6, priority = "random", size = 20,
+                            alpha = 1, corral = "random") +
+  geom_boxplot(aes(group = x_pos), fill = NA, width = 1, outlier.shape = NA,
+               linewidth = 2, color = "black") +
+  stat_summary(aes(group = x_pos), fun = mean, geom = "point",
+               shape = 15, size = 30, color = "black") +
+  geom_segment(data = test_results,
+               aes(x = group1_x, xend = group2_x, y = y_position, yend = y_position),
+               inherit.aes = FALSE, linewidth = 2, color = "black") +
+  geom_text(data = test_results,
+            aes(x = (group1_x + group2_x) / 2, y = y_position + 0.01, label = stars),
+            inherit.aes = FALSE, size = 30, color = "black", fontface = "bold") +
+  scale_x_continuous(breaks = unname(spacing_map),
+                     labels = c("control", "homeostatic\nplasticity")) +
+  scale_color_manual(values = date_colors) +
+  scale_y_continuous(oob = scales::oob_keep, breaks = c(0.1, 0.3, 0.5),
+                     limits = c(0, 0.55), expand = c(0, 0)) +
+  labs(x = "", y = "MERCS /\ntotal ER area") +
+  theme_classic() +
+  theme(
+    axis.title = element_text(size = 80, color = "black"),
+    axis.text = element_text(size = 80, color = "black"),
+    axis.ticks = element_line(linewidth = 5, color = "black"),
+    axis.ticks.length = grid::unit(0.5, "cm"),
+    axis.line = element_line(linewidth = 2, color = "black"),
+    legend.position = "none"
+  )
+
+fig5c_top_plot
+```
+
+```{r fig-5c-top-save, include=FALSE}
+dir.create("./Graphs", recursive = TRUE, showWarnings = FALSE)
+
+output_file <- "./Graphs/Fig 5C (top).png"
+
+ggsave(output_file, fig5c_top_plot, width = 18, height = 14, units = "in", dpi = 300)
+
+tibble(Figure = "Fig 5C (top)", File = output_file)
+```
+
+# Fig 5C (bottom)
+
+Total reconstructed ER surface area surrounding juxtaspinal mitochondrial regions.
+
+**Source data**  
+`Fig 5C.csv`
+
+**Columns**
+
+- `Date` — Experiment date
+- `Condition` — Control or TTX
+- `Mito` — Mitochondrial reconstruction ID
+- `ER_surf_um2` — Endoplasmic reticulum surface area (µm²)
+
+## Data
+
+```{r fig-5c-bottom-data}
+condition_order <- c("Control", "TTX")
+spacing_map <- c("Control" = 1, "TTX" = 2.2)
+
+Density <- read_csv("./Fig 5C.csv", show_col_types = FALSE) %>%
+  filter(Condition %in% condition_order) %>%
+  mutate(
+    Condition = factor(Condition, levels = condition_order),
+    Date = factor(trimws(as.character(Date))),
+    ER_surf_um2 = as.numeric(ER_surf_um2),
+    x_pos = unname(spacing_map[as.character(Condition)]),
+    color_key = paste(Condition, Date, sep = "_")
+  ) %>%
+  filter(is.finite(ER_surf_um2))
+
+if (nrow(Density) == 0) stop("No valid ER surface-area measurements remain.")
+
+Density %>%
+  mutate(across(where(is.numeric), ~ round(.x, 3)))
+```
+
+## Summary
+
+```{r fig-5c-bottom-summary}
+summary_table <- Density %>%
+  group_by(Condition) %>%
+  summarise(
+    n_Mitochondria = n(),
+    n_Experiment_Dates = n_distinct(Date),
+    `Mean (SE)` = sprintf("%.3f (%.3f)", mean(ER_surf_um2), sd(ER_surf_um2) / sqrt(n())),
+    .groups = "drop"
+  )
+
+summary_table
+```
+
+## Statistics
+
+Two-way ANOVA with condition, experiment date, and their interaction (Type I sums of squares).
+
+```{r fig-5c-bottom-statistics}
+fit_aov <- aov(ER_surf_um2 ~ Condition * Date, data = Density)
+anova_table <- anova(fit_aov)
+condition_p <- as.numeric(anova_table["Condition", "Pr(>F)"])
+format_p <- function(p) ifelse(p < 0.0001, "<0.0001", sprintf("%.4f", p))
+
+group_means <- Density %>%
+  group_by(Condition) %>%
+  summarise(mean = mean(ER_surf_um2), SE = sd(ER_surf_um2) / sqrt(n()), .groups = "drop")
+
+stats_table <- tibble(
+  Test = "Two-way ANOVA",
+  Comparison = "Control vs TTX",
+  `Control mean (SE)` = sprintf("%.3f (%.3f)", group_means$mean[1], group_means$SE[1]),
+  `TTX mean (SE)` = sprintf("%.3f (%.3f)", group_means$mean[2], group_means$SE[2]),
+  `Condition p` = format_p(condition_p)
+)
+
+stats_table
+```
+
+## Plot
+
+```{r fig-5c-bottom-plot, fig.width=18, fig.height=12, fig.retina=1, out.width="100%", fig.align="center"}
+set.seed(20261109)
+p_to_stars <- function(p) case_when(
+  p < 0.001 ~ "***", p < 0.01 ~ "**",
+  p < 0.05 ~ "*", TRUE ~ "ns"
+)
+
+test_results <- tibble(
+  group1_x = spacing_map["Control"],
+  group2_x = spacing_map["TTX"],
+  y_position = 1.8,
+  stars = p_to_stars(condition_p)
+) %>%
+  filter(stars != "ns")
+
+date_levels <- levels(Density$Date)
+
+date_colors <- c(
+  setNames(rep(c("#1A1A1A", "#4D4D4D", "#6F7C80"), length.out = length(date_levels)),
+           paste("Control", date_levels, sep = "_")),
+  setNames(rep(c("#A6D9F5", "#2596D1", "#003B5C"), length.out = length(date_levels)),
+           paste("TTX", date_levels, sep = "_"))
+)
+
+fig5c_bottom_plot <- ggplot(Density, aes(x_pos, ER_surf_um2, color = color_key)) +
+  ggbeeswarm::geom_beeswarm(cex = 6, priority = "random", size = 20,
+                            alpha = 1, corral = "random") +
+  geom_boxplot(aes(group = x_pos), fill = NA, width = 1, outlier.shape = NA,
+               linewidth = 2, color = "black") +
+  stat_summary(aes(group = x_pos), fun = mean, geom = "point",
+               shape = 15, size = 30, color = "black") +
+  geom_segment(data = test_results,
+               aes(x = group1_x, xend = group2_x, y = y_position, yend = y_position),
+               inherit.aes = FALSE, linewidth = 2, color = "black") +
+  geom_text(data = test_results,
+            aes(x = (group1_x + group2_x) / 2, y = y_position + 0.04, label = stars),
+            inherit.aes = FALSE, size = 30, color = "black", fontface = "bold") +
+  scale_x_continuous(breaks = unname(spacing_map),
+                     labels = c("control", "homeostatic\nplasticity")) +
+  scale_color_manual(values = date_colors) +
+  scale_y_continuous(oob = scales::oob_keep, breaks = c(0.5, 1, 1.5), limits = c(0, 2), expand = c(0, 0)) +
+  labs(x = "", y = expression(ER~surf~area~group("(", mu*m^2, ")"))) +
+  theme_classic() +
+  theme(
+    axis.title = element_text(size = 60, color = "black"),
+    axis.text = element_text(size = 80, color = "black"),
+    axis.ticks = element_line(linewidth = 5, color = "black"),
+    axis.ticks.length = grid::unit(0.5, "cm"),
+    axis.line = element_line(linewidth = 2, color = "black"),
+    legend.position = "none"
+  )
+
+fig5c_bottom_plot
+```
+
+```{r fig-5c-bottom-save, include=FALSE}
+dir.create("./Graphs", recursive = TRUE, showWarnings = FALSE)
+
+output_file <- "./Graphs/Fig 5C (bottom).png"
+
+ggsave(output_file, fig5c_bottom_plot, width = 18, height = 12, units = "in", dpi = 300)
+
+tibble(Figure = "Fig 5C (bottom)", File = output_file)
+```
+
+# Fig 5D
+
+Estimated number of ribosomes proximal to reconstructed juxtaspinal mitochondrial regions.
+
+**Source data**  
+`Fig 5D, E.csv`
+
+**Columns**
+
+- `Date` — Experiment date
+- `Condition` — Control or TTX
+- `Mito` — Mitochondrial reconstruction ID
+- `n_ribosomes` — Estimated ribosome count within 50 nm of the outer mitochondrial membrane
+
+## Data
+
+```{r fig-5d-data}
+condition_order <- c("Control", "TTX")
+spacing_map <- c("Control" = 1, "TTX" = 2.2)
+
+Density <- read_csv("./Fig 5D, E.csv", show_col_types = FALSE) %>%
+  filter(Condition %in% condition_order) %>%
+  mutate(
+    Condition = factor(Condition, levels = condition_order),
+    Date = factor(trimws(as.character(Date))),
+    n_ribosomes = as.numeric(n_ribosomes),
+    x_pos = unname(spacing_map[as.character(Condition)]),
+    color_key = paste(Condition, Date, sep = "_")
+  ) %>%
+  filter(is.finite(n_ribosomes))
+
+if (nrow(Density) == 0) stop("No valid ribosome measurements remain.")
+
+Density %>%
+  mutate(across(where(is.numeric), ~ round(.x, 3)))
+```
+
+## Summary
+
+```{r fig-5d-summary}
+summary_table <- Density %>%
+  group_by(Condition) %>%
+  summarise(
+    n_Mitochondria = n(),
+    n_Experiment_Dates = n_distinct(Date),
+    `Mean (SE)` = sprintf("%.3f (%.3f)", mean(n_ribosomes), sd(n_ribosomes) / sqrt(n())),
+    .groups = "drop"
+  )
+
+summary_table
+```
+
+## Statistics
+
+Two-way ANOVA with condition, experiment date, and their interaction (Type I sums of squares).
+
+```{r fig-5d-statistics}
+fit_aov <- aov(n_ribosomes ~ Condition * Date, data = Density)
+anova_table <- anova(fit_aov)
+condition_p <- as.numeric(anova_table["Condition", "Pr(>F)"])
+format_p <- function(p) ifelse(p < 0.0001, "<0.0001", sprintf("%.4f", p))
+
+group_means <- Density %>%
+  group_by(Condition) %>%
+  summarise(mean = mean(n_ribosomes), SE = sd(n_ribosomes) / sqrt(n()), .groups = "drop")
+
+stats_table <- tibble(
+  Test = "Two-way ANOVA",
+  Comparison = "Control vs TTX",
+  `Control mean (SE)` = sprintf("%.3f (%.3f)", group_means$mean[1], group_means$SE[1]),
+  `TTX mean (SE)` = sprintf("%.3f (%.3f)", group_means$mean[2], group_means$SE[2]),
+  `Condition p` = format_p(condition_p)
+)
+
+stats_table
+```
+
+## Plot
+
+```{r fig-5d-plot, fig.width=18, fig.height=24, fig.retina=1, out.width="100%", fig.align="center"}
+set.seed(20261109)
+p_to_stars <- function(p) case_when(
+  p < 0.001 ~ "***", p < 0.01 ~ "**",
+  p < 0.05 ~ "*", TRUE ~ "ns"
+)
+
+test_results <- tibble(
+  group1_x = spacing_map["Control"],
+  group2_x = spacing_map["TTX"],
+  y_position = 238,
+  stars = p_to_stars(condition_p)
+) %>%
+  filter(stars != "ns")
+
+date_levels <- levels(Density$Date)
+
+date_colors <- c(
+  setNames(rep(c("#1A1A1A", "#4D4D4D", "#6F7C80"), length.out = length(date_levels)),
+           paste("Control", date_levels, sep = "_")),
+  setNames(rep(c("#E6A8C8", "#B33A78", "#5C123A"), length.out = length(date_levels)),
+           paste("TTX", date_levels, sep = "_"))
+)
+
+fig5d_plot <- ggplot(Density, aes(x_pos, n_ribosomes, color = color_key)) +
+  ggbeeswarm::geom_beeswarm(cex = 9, priority = "random", size = 20,
+                            alpha = 1, corral = "random") +
+  geom_boxplot(aes(group = x_pos), fill = NA, width = 1, outlier.shape = NA,
+               linewidth = 2, color = "black") +
+  stat_summary(aes(group = x_pos), fun = mean, geom = "point",
+               shape = 15, size = 30, color = "black") +
+  geom_segment(data = test_results,
+               aes(x = group1_x, xend = group2_x, y = y_position, yend = y_position),
+               inherit.aes = FALSE, linewidth = 2, color = "black") +
+  geom_text(data = test_results,
+            aes(x = (group1_x + group2_x) / 2, y = y_position + 5, label = stars),
+            inherit.aes = FALSE, size = 30, color = "black", fontface = "bold") +
+  scale_x_continuous(breaks = unname(spacing_map),
+                     labels = c("control", "homeostatic\nplasticity")) +
+  scale_color_manual(values = date_colors) +
+  scale_y_continuous(oob = scales::oob_keep, 
+    breaks = c(0, 50, 100, 150, 200),
+    limits = c(-10, 250),
+    expand = c(0, 0)
+  ) +
+  labs(x = "", y = "ribosomes") +
+  theme_classic() +
+  theme(
+    axis.title = element_text(size = 60, color = "black"),
+    axis.text = element_text(size = 80, color = "black"),
+    axis.ticks = element_line(linewidth = 5, color = "black"),
+    axis.ticks.length = grid::unit(0.5, "cm"),
+    axis.line = element_line(linewidth = 2, color = "black"),
+    legend.position = "none"
+  )
+
+fig5d_plot
+```
+
+```{r fig-5d-save, include=FALSE}
+dir.create("./Graphs", recursive = TRUE, showWarnings = FALSE)
+
+output_file <- "./Graphs/Fig 5D.png"
+
+ggsave(output_file, fig5d_plot, width = 18, height = 24, units = "in", dpi = 300)
+
+tibble(Figure = "Fig 5D", File = output_file)
+```
+
+# Fig 5E
+
+Fraction of reconstructed juxtaspinal mitochondrial regions with ribosomes detected within 50 nm of the OMM.
+
+**update for 2026 pending** — The source combines regions with ribosomes beyond 50 nm and regions without ribosomes.
+
+**Source data**  
+`Fig 5D, E.csv`
+
+**Columns**
+
+- `Date` — Experiment date
+- `Condition` — Control or TTX
+- `Mito` — Mitochondrial reconstruction ID
+- `n_ribosomes` — Estimated ribosome count within 50 nm of the outer mitochondrial membrane
+
+## Data
+
+A positive ribosome count indicates at least one ribosome within 50 nm.
+
+```{r fig-5e-data}
+Density <- read_csv("./Fig 5D, E.csv", show_col_types=FALSE) %>%
+  filter(Condition %in% c("Control", "TTX")) %>%
+  mutate(Condition=factor(Condition, levels=c("Control", "TTX")),
+         Date=as.character(Date), n_ribosomes=as.numeric(n_ribosomes))
+if (any(!is.finite(Density$n_ribosomes)) || any(Density$n_ribosomes < 0))
+  stop("Ribosome counts must be finite and nonnegative; missing values are not zero.")
+Density <- Density %>% mutate(Category=if_else(n_ribosomes > 0,
+  "Within 50 nm of OMM", "No proximal ribosomes detected"))
+Density
+```
+
+## Summary
+
+```{r fig-5e-summary}
+summary_table <- Density %>% count(Condition, Category, name="n_Regions") %>%
+  group_by(Condition) %>% mutate(total_regions=sum(n_Regions),
+                                Percent=100*n_Regions/total_regions) %>% ungroup()
+summary_table
+```
+
+## Statistics
+
+Two-sided Fisher exact test on condition by presence of proximal ribosomes.
+
+```{r fig-5e-statistics}
+fisher_table <- table(Density$Condition, Density$Category)
+fisher_table
+fisher_result <- fisher.test(fisher_table)
+pval <- fisher_result$p.value
+stats_table <- tibble(Test="Two-sided Fisher exact test",
+  Comparison="Proximal ribosomes present vs not detected, Control vs TTX",
+  Odds_ratio=unname(fisher_result$estimate),
+  CI_low=fisher_result$conf.int[1], CI_high=fisher_result$conf.int[2],
+  p_value=pval)
+stats_table
+```
+
+## Plot
+
+```{r fig-5e-plot, fig.width=30, fig.height=20}
+set.seed(20261109)
+fig5e_plot <- ggplot(summary_table, aes(x=1,y=n_Regions,fill=Category)) +
+  geom_col(width=1,color="white",linewidth=1) +
+  geom_text(aes(label=paste0(round(Percent,1),"%")),
+            position=position_stack(vjust=0.5),size=20) +
+  coord_polar(theta="y") +
+  facet_wrap(~Condition, labeller=as_labeller(c(Control="control",TTX="homeostatic plasticity"))) +
+  scale_fill_manual(values=c("Within 50 nm of OMM"="#B33A78",
+                             "No proximal ribosomes detected"="#BDBDBD")) +
+  labs(caption=paste0("Fisher exact test: p = ",format.pval(pval,digits=4))) +
+  theme_void() + theme(plot.background=element_rect(fill="white",color=NA), strip.text=element_text(size=60),legend.text=element_text(size=35),
+                      legend.title=element_blank(),legend.position="bottom",
+                      plot.caption=element_text(size=35))
+fig5e_plot
+```
+
+```{r fig-5e-save, include=FALSE}
+dir.create("./Graphs",recursive=TRUE,showWarnings=FALSE)
+ggsave("./Graphs/Fig 5E.png",fig5e_plot,width=30,height=20,units="in",dpi=300)
+```

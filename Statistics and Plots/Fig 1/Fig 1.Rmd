@@ -1,0 +1,850 @@
+---
+title: "Figure 1: Local mitochondrial enlargement and connectomics"
+knit: (function(inputFile, encoding) { inputFile <- normalizePath(inputFile); oldwd <- setwd(dirname(inputFile)); on.exit(setwd(oldwd)); rmarkdown::render(basename(inputFile), encoding = encoding, output_file = "Fig 1.html", knit_root_dir = getwd()) })
+output:
+  html_document:
+    theme: darkly
+    highlight: breezedark
+    df_print: paged
+    toc: true
+    toc_depth: 1
+    toc_float: true
+    code_folding: hide
+    self_contained: true
+    mathjax: null
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE,
+                     fig.width = 30, fig.height = 20, fig.retina = 1,
+                     out.width = "100%", fig.align = "center")
+suppressPackageStartupMessages({
+  library(dplyr); library(readr); library(ggplot2); library(ggtext)
+  library(afex); library(emmeans)
+})
+format_p <- function(p) ifelse(p < 0.0001, "<0.0001", sprintf("%.4f", p))
+p_to_stars <- function(p) case_when(p < 0.001 ~ "***", p < 0.01 ~ "**", p < 0.05 ~ "*", TRUE ~ "ns")
+mean_se <- function(x) sprintf("%.3f (%.3f)", mean(x), sd(x) / sqrt(length(x)))
+culture_id <- function(x) case_when(
+  as.character(x) %in% c("2026-05-06", "2026-05-08") ~ "Culture 1",
+  as.character(x) %in% c("2026-06-10", "2026-06-12") ~ "Culture 5",
+  TRUE ~ as.character(x)
+)
+figure_theme <- function(title_size = 80, text_size = 80) {
+  theme_classic() +
+    theme(axis.title = element_text(size = title_size, color = "black"),
+          axis.text = element_text(size = text_size, color = "black"),
+          axis.ticks = element_line(linewidth = 5, color = "black"),
+          axis.ticks.length = grid::unit(0.5, "cm"),
+          axis.line = element_line(linewidth = 2, color = "black"),
+          plot.background = element_rect(fill = "white", color = NA),
+          legend.position = "none")
+}
+normalize_id <- function(x) {
+  x <- trimws(as.character(x))
+  x <- sub("^([0-9]+)\\.0$", "\\1", x)
+  x[tolower(x) %in% c("", "nan", "none", "null", "<na>")] <- NA_character_
+  x
+}
+dir.create("./Graphs", recursive = TRUE, showWarnings = FALSE)
+
+set.seed(20261109)
+options(width = 120, dplyr.summarise.inform = FALSE)
+options(contrasts = c("contr.treatment", "contr.poly"))
+
+```
+
+# Fig 1C
+
+Responses of juxtaspinal mitochondrial regions during single-spine plasticity.
+
+**update for 2026 pending** — Spine-level replicate IDs are unavailable.
+
+**Source data**  
+`Fig 1C.csv`
+
+**Columns**
+
+- `Response` — Recruitment, protrusion, budding, or no change
+- `spines` — Number of spines in the category
+
+## Data
+
+One row per response category.
+
+```{r fig-1c-data}
+response_order <- c("recruitment", "protrusion", "budding", "no change")
+Responses <- read_csv("./Fig 1C.csv", show_col_types = FALSE) %>%
+  mutate(Response = factor(Response, levels = response_order), spines = as.integer(spines))
+stopifnot(nrow(Responses) == 4, !anyNA(Responses), all(Responses$spines >= 0),
+          !anyDuplicated(Responses$Response), sum(Responses$spines) > 0)
+Responses
+```
+
+## Summary
+
+```{r fig-1c-summary}
+summary_table <- Responses %>% mutate(total_spines = sum(spines),
+                                      Percent = 100 * spines / total_spines)
+summary_table
+```
+
+## Statistics
+
+Descriptive counts and percentages.
+
+## Plot
+
+```{r fig-1c-plot, fig.width=20, fig.height=20}
+set.seed(20261109)
+fig1c_plot <- ggplot(summary_table, aes(x = 1, y = spines, fill = Response)) +
+  geom_col(width = 1, color = "white", linewidth = 1) +
+  geom_text(aes(label = paste0(round(Percent, 1), "%")),
+            position = position_stack(vjust = 0.5), size = 16) +
+  coord_polar(theta = "y") +
+  scale_fill_manual(values = c("recruitment"="#66FF66", "protrusion"="#00DC00",
+                               "budding"="#009A00", "no change"="#BDBDBD")) +
+  guides(fill=guide_legend(nrow=2,byrow=TRUE)) +
+  theme_void() + theme(plot.background=element_rect(fill="white",color=NA), legend.text = element_text(size = 30),
+                      legend.title = element_blank(), legend.position = "bottom")
+fig1c_plot
+```
+
+```{r fig-1c-save, include=FALSE}
+dir.create("./Graphs", recursive=TRUE, showWarnings=FALSE)
+ggsave("./Graphs/Fig 1C.png", fig1c_plot, width=20, height=20, units="in", dpi=300)
+```
+
+# Fig 1D (top)
+
+Baseline area of juxtaspinal and non-juxtaspinal regions before single-spine plasticity induction.
+
+**Source data**  
+`Fig 1D.csv`
+
+**Columns**
+
+- `date` — Experiment date
+- `condition` — Experimental condition
+- `region` — Juxtaspinal or non-juxtaspinal region
+- `dish` — Culture dish ID
+- `cell` — Cell ID
+- `spine` — Spine ID
+- `time` — Time relative to induction (min)
+- `mito_area_um2` — Mitochondrial area (µm²)
+
+## Data
+
+Baseline area is the mean of the complete −2, −1, and 0 min measurements for each region.
+
+```{r fig-1d-top-data}
+region_order <- c("Juxta", "NonJuxta")
+spacing_map <- c("Juxta" = 2.2, "NonJuxta" = 3.8)
+Mito <- read_csv("./Fig 1D.csv", show_col_types = FALSE) %>%
+  mutate(condition = trimws(as.character(condition)), region = factor(region, levels = region_order),
+         date = trimws(as.character(date)),
+         across(c(dish, cell, spine, time, mito_area_um2), as.numeric)) %>%
+  filter(condition == "Control", !is.na(region), date != "", is.finite(time), is.finite(mito_area_um2))
+if (nrow(Mito) == 0) stop("No valid observations remain.")
+time_levels <- sort(unique(Mito$time))
+if (length(time_levels) < 3) stop("Fewer than three time points were found.")
+
+baseline_df <- Mito %>%
+  mutate(time_order = match(time, time_levels), trace_id = paste(date, dish, cell, spine, sep = "_")) %>%
+  filter(time_order <= 3) %>% group_by(date, condition, region, dish, cell, spine, trace_id) %>%
+  summarise(baseline_mito_area = mean(mito_area_um2), n_timepoints = n_distinct(time_order), .groups = "drop") %>%
+  filter(n_timepoints == 3, is.finite(baseline_mito_area)) %>%
+  mutate(date = factor(date), date_region = paste(region, date, sep = "_"),
+         x_pos = unname(spacing_map[as.character(region)]))
+if (nrow(baseline_df) == 0) stop("No spines contain all three baseline time points.")
+Mito %>% mutate(across(where(is.numeric), ~ round(.x, 3)))
+```
+
+## Summary
+
+```{r fig-1d-top-summary}
+summary_table <- baseline_df %>% group_by(condition, region) %>%
+  summarise(n_spines = n_distinct(trace_id), n_cells = n_distinct(date, dish, cell),
+            n_Biological_Replicates = n_distinct(culture_id(date)),
+            `Mean (SE)` = mean_se(baseline_mito_area), .groups = "drop")
+summary_table
+```
+
+## Statistics
+
+Two-way ANOVA with region, experiment date, and their interaction (Type I sums of squares).
+
+```{r fig-1d-top-statistics}
+fit_aov <- aov(baseline_mito_area ~ region * date, data = baseline_df)
+anova_table <- anova(fit_aov)
+region_p <- as.numeric(anova_table["region", "Pr(>F)"])
+interaction_p <- as.numeric(anova_table["region:date", "Pr(>F)"])
+group_means <- baseline_df %>% group_by(region) %>%
+  summarise(mean = mean(baseline_mito_area), se = sd(baseline_mito_area) / sqrt(n()), .groups = "drop")
+stats_table <- tibble(
+  Test = "Two-way ANOVA", Comparison = "Control Juxta vs Control NonJuxta",
+  `Juxta mean (SE)` = sprintf("%.3f (%.3f)", group_means$mean[1], group_means$se[1]),
+  `NonJuxta mean (SE)` = sprintf("%.3f (%.3f)", group_means$mean[2], group_means$se[2]),
+  `Region p` = format_p(region_p), `Region x Date p` = format_p(interaction_p)
+)
+stats_table
+```
+
+## Plot
+
+```{r fig-1d-top-plot, fig.width=30, fig.height=12}
+set.seed(20261109)
+test_results <- tibble(group1_x = 2.2, group2_x = 3.8, y_position = 3.7,
+                       stars = p_to_stars(region_p)) %>% filter(stars != "ns")
+date_levels <- levels(baseline_df$date)
+date_region_colors <- c(
+  setNames(rep(c("#00B400", "#00DC00", "#66FF66"), length.out = length(date_levels)), paste("Juxta", date_levels, sep = "_")),
+  setNames(rep(c("#004D00", "#008000", "#2E8B57"), length.out = length(date_levels)), paste("NonJuxta", date_levels, sep = "_"))
+)
+fig1d_top_plot <- ggplot(baseline_df, aes(x_pos, baseline_mito_area, color = date_region)) +
+  ggbeeswarm::geom_beeswarm(cex = 5, priority = "random", size = 20, alpha = 1, corral = "random") +
+  geom_boxplot(aes(group = x_pos), fill = NA, width = 1, outlier.shape = NA, linewidth = 2, color = "black") +
+  stat_summary(aes(group = x_pos), fun = mean, geom = "point", shape = 15, size = 20, color = "black") +
+  geom_segment(data = test_results, aes(x = group1_x, xend = group2_x, y = y_position, yend = y_position),
+               inherit.aes = FALSE, linewidth = 2, color = "black") +
+  geom_text(data = test_results, aes(x = (group1_x + group2_x) / 2, y = y_position + 0.08, label = stars),
+            inherit.aes = FALSE, size = 25, color = "black", fontface = "bold") +
+  scale_x_continuous(oob = scales::oob_keep, breaks = unname(spacing_map), labels = c("juxta", "non juxta"),
+                     limits = c(0.4, 5.6), expand = c(0, 0)) +
+  scale_color_manual(values = date_region_colors) +
+  scale_y_continuous(oob = scales::oob_keep, breaks = c(1, 2, 3), limits = c(0.2, 3.95), expand = c(0, 0)) +
+  labs(x = NULL, y = expression(baseline~mito~area~group("(", mu*m^2, ")"))) +
+  figure_theme(60, 80)
+fig1d_top_plot
+```
+
+```{r fig-1d-top-save, include=FALSE}
+output_file <- "./Graphs/Fig 1D (top).png"
+ggsave(output_file, fig1d_top_plot, width = 30, height = 12, units = "in", dpi = 300)
+tibble(Figure = "Fig 1D (top)", File = output_file)
+```
+
+# Fig 1D (bottom)
+
+Time course of juxtaspinal and non-juxtaspinal mitochondrial area after single-spine plasticity induction.
+
+**Source data**  
+`Fig 1D.csv`
+
+**Columns**
+
+- `date` — Experiment date
+- `condition` — Experimental condition
+- `region` — Juxtaspinal or non-juxtaspinal region
+- `dish` — Culture dish ID
+- `cell` — Cell ID
+- `spine` — Spine ID
+- `time` — Time relative to induction (min)
+- `mito_area_um2` — Mitochondrial area (µm²)
+- `norm_mito_area_um2` — Baseline-normalized mitochondrial area (unitless)
+
+## Data
+
+Tests use raw area. The time course shows area relative to baseline.
+
+```{r fig-1d-bottom-data}
+region_order <- c("Juxta", "NonJuxta")
+Mito <- read_csv("./Fig 1D.csv", show_col_types = FALSE) %>%
+  mutate(condition = trimws(as.character(condition)), region = factor(region, levels = region_order),
+         date = trimws(as.character(date)),
+         across(c(dish, cell, spine, time, mito_area_um2, norm_mito_area_um2), as.numeric)) %>%
+  filter(condition == "Control", !is.na(region), date != "", is.finite(time))
+Mito %>% mutate(across(where(is.numeric), ~ round(.x, 3)))
+```
+
+## Summary
+
+```{r fig-1d-bottom-summary}
+summary_table <- Mito %>% group_by(condition, region) %>%
+  summarise(n_spines = n_distinct(date, dish, cell, spine),
+            n_Biological_Replicates = n_distinct(culture_id(date)), .groups = "drop")
+summary_table
+```
+
+## Statistics
+
+Repeated-measures ANOVA within region on raw area, with Greenhouse–Geisser correction and Tukey-adjusted period comparisons.
+
+```{r fig-1d-bottom-statistics}
+time_levels <- sort(unique(Mito$time))
+block_levels <- c("Baseline", "Post1", "Post2")
+if (length(time_levels) < 16) stop("At least 16 time points are required.")
+range_label <- function(x) paste0(min(x), "-", max(x))
+block_ranges <- c(Baseline = range_label(time_levels[1:3]),
+                  Post1 = range_label(time_levels[4:6]), Post2 = range_label(time_levels[7:16]))
+block_data <- Mito %>%
+  mutate(time_order = match(time, time_levels),
+         time_block = case_when(time_order <= 3 ~ "Baseline", time_order <= 6 ~ "Post1", time_order <= 16 ~ "Post2"),
+         trace_id = paste(date, dish, cell, spine, sep = "_")) %>%
+  filter(!is.na(time_block), is.finite(mito_area_um2)) %>%
+  group_by(region, trace_id, time_block) %>%
+  summarise(mito_area_um2 = mean(mito_area_um2), .groups = "drop") %>%
+  mutate(time_block = factor(time_block, levels = block_levels))
+
+stats_results <- list()
+for (region_name in region_order) {
+  region_data <- block_data %>% filter(region == region_name) %>% select(trace_id, time_block, mito_area_um2)
+  complete_ids <- region_data %>% count(trace_id) %>% filter(n == 3) %>% pull(trace_id)
+  region_data <- region_data %>% filter(trace_id %in% complete_ids) %>% mutate(trace_id = factor(trace_id))
+  if (n_distinct(region_data$trace_id) < 2) next
+  rm_aov <- suppressMessages(afex::aov_ez(id = "trace_id", dv = "mito_area_um2", within = "time_block",
+                                         data = region_data, anova_table = list(correction = "GG")))
+  emmeans_table <- emmeans::emmeans(rm_aov, ~ time_block)
+  means <- as.data.frame(emmeans_table)
+  comparisons <- as.data.frame(emmeans::contrast(emmeans_table, "pairwise", adjust = "tukey")) %>%
+    filter(grepl("^Baseline - ", contrast)) %>% mutate(compared_block = sub("^Baseline - ", "", contrast))
+  baseline_index <- match("Baseline", means$time_block)
+  block_index <- match(comparisons$compared_block, means$time_block)
+  stats_results[[region_name]] <- tibble(
+    region = region_name, compared_block = comparisons$compared_block,
+    `Baseline mean (SE)` = sprintf("%.3f (%.3f)", means$emmean[baseline_index], means$SE[baseline_index]),
+    `Compared mean (SE)` = sprintf("%.3f (%.3f)", means$emmean[block_index], means$SE[block_index]),
+    anova_p = as.numeric(rm_aov$anova_table[["Pr(>F)"]][1]), p_value = comparisons$p.value
+  )
+}
+posthoc_df <- bind_rows(stats_results)
+if (nrow(posthoc_df) == 0) stop("No region had at least two complete spines.")
+stats_table <- posthoc_df %>% transmute(
+  condition = "Control", region, Test = "Repeated-measures ANOVA with Tukey post hoc",
+  Comparison = paste(block_ranges["Baseline"], "vs", block_ranges[compared_block]),
+  `Baseline mean (SE)`, `Compared mean (SE)`,
+  `ANOVA p` = format_p(anova_p), `Tukey p` = format_p(p_value)
+)
+stats_table
+```
+
+## Plot
+
+The red bar marks single-spine induction from 0 to 2 min.
+
+```{r fig-1d-bottom-plot}
+set.seed(20261109)
+region_colors <- c(Juxta = "#00DC00", NonJuxta = "#008000")
+norm_summary <- Mito %>% mutate(time_order = match(time, time_levels)) %>%
+  group_by(region, time, time_order) %>%
+  summarise(mean_value = mean(norm_mito_area_um2, na.rm = TRUE),
+            sd = sd(norm_mito_area_um2, na.rm = TRUE),
+            n = sum(is.finite(norm_mito_area_um2)), sem = sd / sqrt(n), .groups = "drop") %>%
+  filter(n > 0, is.finite(mean_value))
+errorbars <- norm_summary %>% filter(time_order %% 2 == 0, is.finite(sem))
+annotations <- posthoc_df %>% filter(compared_block == "Post2", p_value < 0.05) %>%
+  mutate(x_start = time_levels[7], x_end = time_levels[16],
+         x_label = (x_start + x_end) / 2, y = 1.2, stars = p_to_stars(p_value))
+norm_plot <- ggplot(norm_summary, aes(time, mean_value, color = region, group = region)) +
+  geom_hline(yintercept = 1, color = "grey50", linetype = "dashed", linewidth = 3) +
+  geom_line(linewidth = 5) + geom_point(size = 20) +
+  geom_errorbar(data = errorbars, aes(ymin = mean_value - sem, ymax = mean_value + sem), width = 0.6, linewidth = 4) +
+  geom_segment(data = annotations, aes(x = x_start, xend = x_end, y = y, yend = y),
+               inherit.aes = FALSE, color = "black", linewidth = 3) +
+  geom_text(data = annotations, aes(x = x_label, y = y, label = stars),
+            inherit.aes = FALSE, color = "black", vjust = -0.3, size = 28, fontface = "bold") +
+  scale_color_manual(values = region_colors, breaks = region_order) +
+  scale_x_continuous(breaks = c(-2, 2, 12, 22, 32, 42, 52, 62), expand = expansion(add = c(1, 1))) +
+  scale_y_continuous(oob = scales::oob_keep, limits = c(0.92, 1.4), breaks = c(1.0, 1.1, 1.2), expand = c(0, 0)) +
+  labs(x = "time since plasticity induction (min)", y = "norm. mito area") +
+  annotate("segment",x=0,xend=2,y=1.38,yend=1.38,color="#D00000",linewidth=6) +
+  figure_theme() +
+  theme(legend.position="bottom",legend.text=element_text(size=35),legend.title=element_blank())
+norm_plot
+```
+
+```{r fig-1d-bottom-save, include=FALSE}
+output_file <- "./Graphs/Fig 1D (bottom).png"
+ggsave(output_file, norm_plot, width = 30, height = 20, units = "in", dpi = 300)
+tibble(Figure = "Fig 1D (bottom)", File = output_file)
+```
+
+# Fig 1F
+
+Juxtaspinal and non-juxtaspinal mitochondrial area under control conditions and after homeostatic plasticity.
+
+**update for 2026 pending** — The source describes cell means. The legend counts mitochondrial regions.
+
+**Source data**  
+`Fig 1F juxta.csv`, `Fig 1F nonjuxta.csv`
+
+**Columns**
+
+- `date` — Experiment date
+- `condition` — Control or TTX
+- `dish` — Culture dish ID
+- `cell` — Cell ID
+- `mito_area_um2` — Mean mitochondrial area per cell (µm²)
+
+## Data
+
+The input file identifies the region type.
+
+```{r fig-1f-data}
+spacing_map <- c("Juxta Control" = 1, "Juxta TTX" = 2.2, "Non Juxta Control" = 3.8, "Non Juxta TTX" = 5)
+juxta_df <- read_csv("./Fig 1F juxta.csv", show_col_types = FALSE) %>%
+  select(date, condition, dish, cell, mito_area_um2) %>% mutate(region = "Juxta")
+nonjuxta_df <- read_csv("./Fig 1F nonjuxta.csv", show_col_types = FALSE) %>%
+  select(date, condition, dish, cell, mito_area_um2) %>% mutate(region = "Non Juxta")
+mito_df <- bind_rows(juxta_df, nonjuxta_df) %>%
+  filter(condition %in% c("Control", "TTX")) %>%
+  mutate(date = factor(trimws(as.character(date))), condition = factor(condition, levels = c("Control", "TTX")),
+         region = factor(region, levels = c("Juxta", "Non Juxta")), mito_area_um2 = as.numeric(mito_area_um2),
+         group = factor(paste(region, condition), levels = names(spacing_map)),
+         x_pos = unname(spacing_map[as.character(group)]), group_date = paste(group, date, sep = "_")) %>%
+  filter(is.finite(mito_area_um2), !is.na(x_pos))
+mito_df %>% select(date, condition, dish, cell, region, mito_area_um2) %>%
+  mutate(across(where(is.numeric), ~ round(.x, 3)))
+```
+
+## Summary
+
+```{r fig-1f-summary}
+summary_table <- mito_df %>% group_by(region, condition) %>%
+  summarise(n_cells = n_distinct(date, dish, cell), n_Experiment_Dates = n_distinct(date),
+            mean = mean(mito_area_um2), se = sd(mito_area_um2) / sqrt(n()), .groups = "drop") %>%
+  mutate(across(c(mean, se), ~ round(.x, 3)))
+summary_table
+```
+
+## Statistics
+
+Three-way ANOVA with condition, region, experiment date, and their interactions (Type I sums of squares). Pairwise comparisons use Tukey adjustment.
+
+```{r fig-1f-statistics}
+fit_aov <- aov(mito_area_um2 ~ condition * region * date, data = mito_df)
+aov_tab <- anova(fit_aov)
+anova_table <- as.data.frame(aov_tab) %>% tibble::rownames_to_column("Effect") %>%
+  filter(trimws(Effect) != "Residuals") %>%
+  transmute(Effect = dplyr::recode(trimws(Effect), condition = "Condition", region = "Region", date = "Date",
+                                   `condition:region` = "Condition x Region",
+                                   `condition:date` = "Condition x Date",
+                                   `region:date` = "Region x Date",
+                                   `condition:region:date` = "Condition x Region x Date"),
+            df = Df, F = round(`F value`, 3), `p value` = format_p(`Pr(>F)`))
+anova_table
+
+cell_emm <- emmeans::emmeans(fit_aov, ~ region * condition)
+all_pairs <- as.data.frame(emmeans::contrast(cell_emm, "pairwise", adjust = "tukey"))
+pair_parts <- strsplit(as.character(all_pairs$contrast), " - ", fixed = TRUE)
+pair_key <- function(x, y) paste(sort(c(x, y)), collapse = "|")
+all_pairs <- all_pairs %>%
+  mutate(group1 = vapply(pair_parts, `[`, character(1), 1),
+         group2 = vapply(pair_parts, `[`, character(1), 2),
+         pair = mapply(pair_key, group1, group2))
+
+comparison_results <- tibble(
+  group1 = c("Juxta Control", "Non Juxta Control", "Juxta Control", "Juxta TTX"),
+  group2 = c("Juxta TTX", "Non Juxta TTX", "Non Juxta Control", "Non Juxta TTX")
+) %>%
+  mutate(pair = mapply(pair_key, group1, group2)) %>%
+  left_join(all_pairs %>% select(pair, p_value = p.value), by = "pair") %>% select(-pair)
+
+group_means <- mito_df %>% group_by(group) %>%
+  summarise(mean = mean(mito_area_um2), se = sd(mito_area_um2) / sqrt(n()), .groups = "drop")
+stats_table <- comparison_results %>%
+  left_join(group_means, by = c("group1" = "group")) %>% rename(mean1 = mean, se1 = se) %>%
+  left_join(group_means, by = c("group2" = "group")) %>% rename(mean2 = mean, se2 = se) %>%
+  transmute(Test = "Three-way ANOVA with Tukey post hoc", Comparison = paste(group1, "vs", group2),
+            `Group 1 mean (SE)` = sprintf("%.3f (%.3f)", mean1, se1),
+            `Group 2 mean (SE)` = sprintf("%.3f (%.3f)", mean2, se2),
+            `Condition p` = format_p(aov_tab["condition", "Pr(>F)"]),
+            `Region p` = format_p(aov_tab["region", "Pr(>F)"]),
+            `Condition x Region p` = format_p(aov_tab["condition:region", "Pr(>F)"]),
+            `Tukey p` = format_p(p_value))
+stats_table
+```
+
+## Plot
+
+```{r fig-1f-plot}
+set.seed(20261109)
+test_results <- comparison_results %>%
+  filter(!(group1 == "Juxta TTX" & group2 == "Non Juxta TTX")) %>%
+  mutate(group1_x = unname(spacing_map[group1]), group2_x = unname(spacing_map[group2]),
+         y_position = case_when(group1 == "Juxta Control" & group2 == "Non Juxta Control" ~ 1.87,
+                                TRUE ~ 1.72),
+         stars = p_to_stars(p_value)) %>% filter(stars != "ns")
+date_levels <- levels(mito_df$date)
+group_date_colors <- c(
+  setNames(rep(c("#1A1A1A", "#4D4D4D", "#777B7E"), length.out = length(date_levels)), paste("Juxta Control", date_levels, sep = "_")),
+  setNames(rep(c("#009A00", "#00DC00", "#66FF66"), length.out = length(date_levels)), paste("Juxta TTX", date_levels, sep = "_")),
+  setNames(rep(c("#9E9E9E", "#BDBDBD", "#D9D9D9"), length.out = length(date_levels)), paste("Non Juxta Control", date_levels, sep = "_")),
+  setNames(rep(c("#003D00", "#008000", "#3A9D23"), length.out = length(date_levels)), paste("Non Juxta TTX", date_levels, sep = "_"))
+)
+fig1f_plot <- ggplot(mito_df, aes(x_pos, mito_area_um2, color = group_date)) +
+  ggbeeswarm::geom_beeswarm(cex = 3, priority = "random", size = 20, corral = "random") +
+  geom_boxplot(aes(group = x_pos), fill = NA, width = 1, outlier.shape = NA, linewidth = 2, color = "black") +
+  stat_summary(aes(group = x_pos), fun = mean, geom = "point", shape = 15, size = 20, color = "black") +
+  geom_segment(data = test_results, aes(x = group1_x, xend = group2_x, y = y_position, yend = y_position),
+               inherit.aes = FALSE, color = "black", linewidth = 2) +
+  geom_text(data = test_results, aes(x = (group1_x + group2_x) / 2, y = y_position + 0.03, label = stars),
+            inherit.aes = FALSE, color = "black", size = 28) +
+  scale_color_manual(values = group_date_colors) +
+  scale_x_continuous(breaks = unname(spacing_map),
+                     labels = c("control", "homeostatic\nplasticity", "control", "homeostatic\nplasticity")) +
+  scale_y_continuous(oob = scales::oob_keep, breaks = c(0, 0.5, 1, 1.5, 2), limits = c(0, 2.15), expand = c(0, 0)) +
+  labs(x = NULL, y = expression(mean~mito~area~group("(", mu*m^2, ")"))) + figure_theme()
+fig1f_plot
+```
+
+```{r fig-1f-save, include=FALSE}
+output_file <- "./Graphs/Fig 1F.png"
+ggsave(output_file, fig1f_plot, width = 30, height = 20, units = "in", dpi = 300)
+tibble(Figure = "Fig 1F", File = output_file)
+```
+
+# Fig 1G
+
+Juxtaspinal mitochondrial area during the first 24 hours of homeostatic plasticity.
+
+**Source data**  
+`Fig 1G.csv`
+
+**Columns**
+
+- `date` — Experiment date
+- `condition` — Control or TTX
+- `dish` — Culture dish ID
+- `cell` — Cell ID
+- `spine` — Spine ID
+- `track_id` — Tracked mitochondrial region ID
+- `mito_area_um2` — Mitochondrial area (µm²)
+- `norm_mito_area` — Baseline-normalized mitochondrial area (unitless)
+- `time_hr` — Time relative to treatment (h)
+
+## Data
+
+The analysis covers −0.25 to 24 h. Tests use raw area, and the plot shows area relative to baseline.
+
+```{r fig-1g-data}
+condition_order <- c("Control", "TTX")
+Mito <- read_csv("./Fig 1G.csv", show_col_types = FALSE) %>%
+  mutate(condition = factor(condition, levels = condition_order), track_id = as.character(track_id),
+         across(c(time_hr, mito_area_um2, norm_mito_area), as.numeric)) %>%
+  filter(!is.na(condition), !is.na(track_id), track_id != "",
+         is.finite(time_hr), time_hr >= -0.25, time_hr <= 24)
+Mito %>% mutate(across(where(is.numeric), ~ round(.x, 3)))
+```
+
+## Summary
+
+```{r fig-1g-summary}
+summary_table <- Mito %>% group_by(condition) %>%
+  summarise(n_spines = n_distinct(track_id), n_Experiment_Dates = n_distinct(date), .groups = "drop")
+summary_table
+```
+
+## Statistics
+
+Repeated-measures ANOVA within condition on raw area, with Greenhouse–Geisser correction and Tukey-adjusted period comparisons.
+
+```{r fig-1g-statistics}
+block_levels <- c("Baseline", "Post1", "Post2")
+block_ranges <- c(Baseline = "-0.25", Post1 = "0-11", Post2 = "12-24")
+block_data <- Mito %>%
+  mutate(time_block = case_when(time_hr == -0.25 ~ "Baseline", time_hr >= 0 & time_hr <= 11 ~ "Post1",
+                                time_hr >= 12 & time_hr <= 24 ~ "Post2")) %>%
+  filter(!is.na(time_block), is.finite(mito_area_um2)) %>%
+  group_by(condition, track_id, time_block) %>%
+  summarise(mito_area_um2 = mean(mito_area_um2), .groups = "drop") %>%
+  mutate(time_block = factor(time_block, levels = block_levels))
+stats_results <- list()
+for (condition_name in condition_order) {
+  condition_data <- block_data %>% filter(condition == condition_name) %>% select(track_id, time_block, mito_area_um2)
+  complete_ids <- condition_data %>% count(track_id) %>% filter(n == 3) %>% pull(track_id)
+  condition_data <- condition_data %>% filter(track_id %in% complete_ids) %>% mutate(track_id = factor(track_id))
+  if (n_distinct(condition_data$track_id) < 2) next
+  rm_aov <- suppressMessages(afex::aov_ez(id = "track_id", dv = "mito_area_um2", within = "time_block",
+                                         data = condition_data, anova_table = list(correction = "GG")))
+  emmeans_table <- emmeans::emmeans(rm_aov, ~ time_block)
+  means <- as.data.frame(emmeans_table)
+  comparisons <- as.data.frame(emmeans::contrast(emmeans_table, "pairwise", adjust = "tukey")) %>%
+    filter(grepl("^Baseline - ", contrast)) %>% mutate(compared_block = sub("^Baseline - ", "", contrast))
+  baseline_index <- match("Baseline", means$time_block)
+  block_index <- match(comparisons$compared_block, means$time_block)
+  stats_results[[condition_name]] <- tibble(
+    condition = condition_name, compared_block = comparisons$compared_block,
+    `Baseline mean (SE)` = sprintf("%.3f (%.3f)", means$emmean[baseline_index], means$SE[baseline_index]),
+    `Compared mean (SE)` = sprintf("%.3f (%.3f)", means$emmean[block_index], means$SE[block_index]),
+    anova_p = as.numeric(rm_aov$anova_table[["Pr(>F)"]][1]), p_value = comparisons$p.value
+  )
+}
+posthoc_df <- bind_rows(stats_results)
+if (nrow(posthoc_df) == 0) stop("No condition had at least two complete tracks.")
+stats_table <- posthoc_df %>% transmute(
+  condition, Test = "Repeated-measures ANOVA with Tukey post hoc",
+  Comparison = paste(block_ranges["Baseline"], "vs", block_ranges[compared_block]),
+  `Baseline mean (SE)`, `Compared mean (SE)`,
+  `ANOVA p` = format_p(anova_p), `Tukey p` = format_p(p_value)
+)
+stats_table
+```
+
+## Plot
+
+```{r fig-1g-plot, fig.width=36, fig.height=20}
+set.seed(20261109)
+condition_colors <- c("Control" = "#777B7E", "TTX" = "#00DC00")
+stat_y <- c("Control" = 1.44, "TTX" = 1.36)
+norm_summary <- Mito %>% mutate(time_order = match(time_hr, sort(unique(time_hr)))) %>%
+  group_by(condition, time_hr, time_order) %>%
+  summarise(mean_value = mean(norm_mito_area, na.rm = TRUE), sd = sd(norm_mito_area, na.rm = TRUE),
+            n = sum(is.finite(norm_mito_area)), sem = sd / sqrt(n), .groups = "drop") %>%
+  filter(n > 0, is.finite(mean_value))
+errorbars <- norm_summary %>% filter(time_order %% 2 == 0, is.finite(sem))
+annotations <- posthoc_df %>% filter(compared_block == "Post2", p_value < 0.05) %>%
+  mutate(x_start = 12, x_end = 24, x_label = 18,
+         y = unname(stat_y[condition]), stars = p_to_stars(p_value))
+norm_plot <- ggplot(norm_summary, aes(time_hr, mean_value, color = condition, group = condition)) +
+  geom_hline(yintercept = 1, color = "grey50", linetype = "dashed", linewidth = 3) +
+  geom_line(linewidth = 5) + geom_point(size = 20) +
+  geom_errorbar(data = errorbars, aes(ymin = mean_value - sem, ymax = mean_value + sem), width = 0.3, linewidth = 4) +
+  geom_segment(data = annotations, aes(x = x_start, xend = x_end, y = y, yend = y),
+               inherit.aes = FALSE, color = "black", linewidth = 3) +
+  geom_text(data = annotations, aes(x = x_label, y = y, label = stars),
+            inherit.aes = FALSE, color = "black", vjust = -0.3, size = 28, fontface = "bold") +
+  scale_color_manual(values = condition_colors, breaks = condition_order) +
+  scale_x_continuous(breaks = c(0, 6, 12, 18, 24), expand = expansion(add = c(0.5, 0.5))) +
+  scale_y_continuous(oob = scales::oob_keep, limits = c(0.8, 1.5), breaks = c(1.0, 1.2, 1.4)) +
+  labs(x = "time since treatment (h)", y = "norm. mito area") + figure_theme() +
+  theme(legend.position="bottom",legend.text=element_text(size=35),legend.title=element_blank())
+norm_plot
+```
+
+```{r fig-1g-save, include=FALSE}
+output_file <- "./Graphs/Fig 1G.png"
+ggsave(output_file, norm_plot, width = 36, height = 20, units = "in", dpi = 300)
+tibble(Figure = "Fig 1G", File = output_file)
+```
+
+# Fig 1I
+
+Association of local spine size and juxtaspinal mitochondrial volume in mouse somatosensory cortex.
+
+**update for 2026 pending** — The current analysis includes 112,246 synapses. The v3 legend reports 87,551.
+
+**Source data**  
+`Fig 1I.csv`
+
+**Columns**
+
+- `neuron_id` — Neuron ID
+- `synapse_id` — Synapse ID
+- `cluster_id` — Spine cluster ID
+- `mito_vol_um3` — Juxtaspinal mitochondrial volume (µm³)
+- `synapse_area_um2` — Synapse area (µm²)
+
+## Data
+
+Synapse areas are summed within clusters. Cluster totals and local mitochondrial volumes are averaged within neurons with more than 50 clusters. Mean cluster synapse area is log₁₀-transformed.
+
+```{r fig-1i-data}
+MIN_CLUSTERS_PER_NEURON <- 50
+raw_df <- read_csv("./Fig 1I.csv", col_types = cols(neuron_id = col_character(),
+                   cluster_id = col_character(), synapse_id = col_character()), show_col_types = FALSE) %>%
+  transmute(neuron_id = normalize_id(neuron_id), cluster_id = normalize_id(cluster_id),
+            synapse_id = normalize_id(synapse_id), synapse_area_um2 = as.numeric(synapse_area_um2),
+            mito_vol_um3 = as.numeric(mito_vol_um3)) %>%
+  filter(!is.na(neuron_id), !is.na(cluster_id), !is.na(synapse_id))
+if (nrow(raw_df) == 0) stop("No rows remain after removing missing identifiers.")
+
+conflicting_synapses <- raw_df %>% group_by(neuron_id, cluster_id, synapse_id) %>%
+  summarise(n_area_values = n_distinct(synapse_area_um2[is.finite(synapse_area_um2)]), .groups = "drop") %>%
+  filter(n_area_values > 1)
+if (nrow(conflicting_synapses) > 0) stop(nrow(conflicting_synapses), " synapses have multiple synapse-area values.")
+
+synapse_df <- raw_df %>% group_by(neuron_id, cluster_id, synapse_id) %>%
+  summarise(synapse_area_um2 = first(synapse_area_um2[is.finite(synapse_area_um2)], default = NA_real_),
+            mito_vol_um3 = if (any(is.finite(mito_vol_um3))) mean(mito_vol_um3[is.finite(mito_vol_um3)]) else NA_real_,
+            .groups = "drop")
+conflicting_clusters <- synapse_df %>% filter(is.finite(mito_vol_um3)) %>% group_by(neuron_id, cluster_id) %>%
+  summarise(mito_range = max(mito_vol_um3) - min(mito_vol_um3), .groups = "drop") %>% filter(mito_range > 1e-12)
+if (nrow(conflicting_clusters) > 0) stop(nrow(conflicting_clusters), " clusters have multiple mitochondrial-volume values.")
+
+cluster_df <- synapse_df %>% group_by(neuron_id, cluster_id) %>%
+  summarise(total_synapse_area_um2 = if (any(is.finite(synapse_area_um2))) sum(synapse_area_um2[is.finite(synapse_area_um2)]) else NA_real_,
+            mito_vol_um3 = if (any(is.finite(mito_vol_um3))) mean(mito_vol_um3[is.finite(mito_vol_um3)]) else NA_real_,
+            total_synapses = n_distinct(synapse_id), .groups = "drop")
+retained_neurons <- cluster_df %>% count(neuron_id, name = "total_clusters") %>%
+  filter(total_clusters > MIN_CLUSTERS_PER_NEURON) %>% pull(neuron_id)
+if (length(retained_neurons) == 0) stop("No neurons have more than ", MIN_CLUSTERS_PER_NEURON, " clusters.")
+cluster_df <- cluster_df %>%
+  filter(neuron_id %in% retained_neurons, is.finite(total_synapse_area_um2), total_synapse_area_um2 > 0,
+         is.finite(mito_vol_um3), mito_vol_um3 >= 0)
+analysis_df <- cluster_df %>% group_by(neuron_id) %>%
+  summarise(total_synapse_area_um2 = mean(total_synapse_area_um2), mito_vol_um3 = mean(mito_vol_um3),
+            clusters_in_average = n_distinct(cluster_id), total_synapses = sum(total_synapses), .groups = "drop") %>%
+  mutate(plot_synapse_area = log10(total_synapse_area_um2)) %>%
+  filter(is.finite(plot_synapse_area), is.finite(mito_vol_um3))
+if (nrow(analysis_df) < 3) stop("At least three data points are required.")
+if (n_distinct(analysis_df$plot_synapse_area) < 2) stop("All x-values are identical.")
+analysis_df %>% mutate(across(where(is.numeric), ~ round(.x, 3)))
+```
+
+## Summary
+
+```{r fig-1i-summary}
+summary_table <- tibble(n_neurons = n_distinct(analysis_df$neuron_id),
+                       n_clusters = nrow(distinct(cluster_df, neuron_id, cluster_id)),
+                       n_synapses = nrow(semi_join(synapse_df, cluster_df, by=c("neuron_id","cluster_id"))))
+summary_table
+```
+
+## Statistics
+
+Two-sided Pearson correlation across neurons. The fitted line shows the 95% confidence band.
+
+```{r fig-1i-statistics}
+correlation_test <- cor.test(analysis_df$plot_synapse_area, analysis_df$mito_vol_um3, method = "pearson")
+pearson_r <- unname(correlation_test$estimate)
+p_value <- correlation_test$p.value
+stats_table <- tibble(Test = "Pearson correlation",
+                      Variables = "Log10 mean synapse area vs mean mitochondrial volume",
+                      n = nrow(analysis_df), `Pearson r` = sprintf("%.3f", pearson_r), `p value` = format_p(p_value))
+stats_table
+```
+
+## Plot
+
+```{r fig-1i-plot, fig.width=20, fig.height=16}
+set.seed(20261109)
+stats_label <- paste0("r = ", sprintf("%.3f", pearson_r),
+                      "\np ", ifelse(p_value < 0.0001, "< 0.0001", paste0("= ", sprintf("%.4f", p_value))),
+                      "\nn = ", nrow(analysis_df))
+fig1i_plot <- ggplot(analysis_df, aes(plot_synapse_area, mito_vol_um3)) +
+  geom_point(shape = 16, size = 15, alpha = 0.8, color = "grey20") +
+  geom_smooth(method = "lm", formula = y ~ x, se = TRUE, level = 0.95,
+              color = "black", fill = "grey60", linewidth = 5, alpha = 0.3) +
+  annotate("text", x = -0.27, y = 0.33, label = stats_label,
+           hjust = 0, vjust = 1, size = 20, color = "black", fontface = "bold") +
+  scale_x_continuous(oob = scales::oob_keep, breaks = c(-0.1, 0.3, 0.7), limits = c(-0.3, 0.9), expand = c(0, 0)) +
+  scale_y_continuous(oob = scales::oob_keep, breaks = c(0, 0.1, 0.2, 0.3), limits = c(0, 0.35), expand = c(0, 0)) +
+  labs(x = expression(spine~size~(log[10]~mu*m^2)), y = expression(mito~volume~(mu*m^3))) +
+  figure_theme(60, 80)
+fig1i_plot
+```
+
+```{r fig-1i-save, include=FALSE}
+output_file <- "./Graphs/Fig 1I.png"
+ggsave(output_file, fig1i_plot, width = 20, height = 16, units = "in", dpi = 300)
+tibble(Figure = "Fig 1I", File = output_file)
+```
+
+# Fig 1J
+
+Association of local spine size and juxtaspinal mitochondrial volume in the visual cortex connectomics dataset.
+
+**update for 2026 pending** — The current analysis gives 348 neurons and r = 0.581. The v3 legend reports 310 neurons and r = 0.66.
+
+**Source data**  
+`Fig 1J.csv.gz`
+
+**Columns**
+
+- `neuron_id` — Neuron ID
+- `synapse_id` — Synapse ID
+- `cluster_id` — Spine cluster ID
+- `cleft_vol_um3` — Synaptic cleft volume (µm³)
+- `mito_vol_um3` — Juxtaspinal mitochondrial volume (µm³)
+
+## Data
+
+Synaptic cleft volumes are summed within clusters. Clusters with incomplete cleft measurements are excluded. Cluster totals and local mitochondrial volumes are averaged within neurons with more than 50 source clusters.
+
+```{r fig-1j-data}
+MIN_CLUSTERS_PER_NEURON <- 50
+X_MULTIPLIER <- 1000
+Y_MULTIPLIER <- 10
+raw_df <- read_csv("./Fig 1J.csv.gz", col_types = cols(neuron_id = col_character(),
+                   cluster_id = col_character(), synapse_id = col_character()), show_col_types = FALSE) %>%
+  transmute(neuron_id = normalize_id(neuron_id), cluster_id = normalize_id(cluster_id),
+            synapse_id = normalize_id(synapse_id), cleft_vol_um3 = as.numeric(cleft_vol_um3),
+            mito_vol_um3 = as.numeric(mito_vol_um3)) %>%
+  filter(!is.na(neuron_id), !is.na(cluster_id), !is.na(synapse_id))
+if (nrow(raw_df) == 0) stop("No rows remain after removing missing identifiers.")
+
+conflicting_synapses <- raw_df %>% group_by(neuron_id, cluster_id, synapse_id) %>%
+  summarise(n_cleft_values = n_distinct(cleft_vol_um3[is.finite(cleft_vol_um3)]), .groups = "drop") %>%
+  filter(n_cleft_values > 1)
+if (nrow(conflicting_synapses) > 0) stop(nrow(conflicting_synapses), " synapses have multiple cleft-volume values.")
+synapse_df <- raw_df %>% group_by(neuron_id, cluster_id, synapse_id) %>%
+  summarise(cleft_vol_um3 = first(cleft_vol_um3[is.finite(cleft_vol_um3)], default = NA_real_),
+            mito_vol_um3 = if (any(is.finite(mito_vol_um3))) mean(mito_vol_um3[is.finite(mito_vol_um3)]) else NA_real_,
+            .groups = "drop")
+conflicting_clusters <- synapse_df %>% filter(is.finite(mito_vol_um3)) %>% group_by(neuron_id, cluster_id) %>%
+  summarise(mito_range = max(mito_vol_um3) - min(mito_vol_um3), .groups = "drop") %>% filter(mito_range > 1e-12)
+if (nrow(conflicting_clusters) > 0) stop(nrow(conflicting_clusters), " clusters have multiple mitochondrial-volume values.")
+
+cluster_df <- synapse_df %>% group_by(neuron_id, cluster_id) %>%
+  summarise(total_cleft_vol_um3 = if (any(is.finite(cleft_vol_um3))) sum(cleft_vol_um3, na.rm = TRUE) else NA_real_,
+            mito_vol_um3 = if (any(is.finite(mito_vol_um3))) mean(mito_vol_um3[is.finite(mito_vol_um3)]) else NA_real_,
+            total_synapses = n_distinct(synapse_id), measured_synapses = sum(is.finite(cleft_vol_um3)),
+            .groups = "drop") %>% mutate(missing_cleft = total_synapses - measured_synapses)
+retained_neurons <- cluster_df %>% count(neuron_id, name = "total_clusters") %>%
+  filter(total_clusters > MIN_CLUSTERS_PER_NEURON) %>% pull(neuron_id)
+if (length(retained_neurons) == 0) stop("No neurons have more than ", MIN_CLUSTERS_PER_NEURON, " clusters.")
+cluster_df <- cluster_df %>%
+  filter(neuron_id %in% retained_neurons, missing_cleft == 0,
+         is.finite(total_cleft_vol_um3), total_cleft_vol_um3 > 0,
+         is.finite(mito_vol_um3), mito_vol_um3 >= 0)
+if (nrow(cluster_df) == 0) stop("No valid cluster measurements remain.")
+analysis_df <- cluster_df %>% group_by(neuron_id) %>%
+  summarise(total_cleft_vol_um3 = mean(total_cleft_vol_um3) * X_MULTIPLIER,
+            mito_vol_um3 = mean(mito_vol_um3) * Y_MULTIPLIER,
+            clusters_in_average = n_distinct(cluster_id), total_synapses = sum(total_synapses), .groups = "drop") %>%
+  mutate(plot_cleft_volume = total_cleft_vol_um3) %>%
+  filter(is.finite(plot_cleft_volume), is.finite(mito_vol_um3))
+if (nrow(analysis_df) < 3) stop("At least three data points are required.")
+if (n_distinct(analysis_df$plot_cleft_volume) < 2) stop("All x-values are identical.")
+analysis_df %>% mutate(across(where(is.numeric), ~ round(.x, 3)))
+```
+
+## Summary
+
+```{r fig-1j-summary}
+summary_table <- tibble(n_neurons = n_distinct(analysis_df$neuron_id),
+                       n_clusters = nrow(distinct(cluster_df, neuron_id, cluster_id)),
+                       n_synapses = sum(cluster_df$total_synapses))
+summary_table
+```
+
+## Statistics
+
+Two-sided Pearson correlation across neurons. The fitted line shows the 95% confidence band.
+
+```{r fig-1j-statistics}
+correlation_test <- cor.test(analysis_df$plot_cleft_volume, analysis_df$mito_vol_um3, method = "pearson")
+pearson_r <- unname(correlation_test$estimate)
+p_value <- correlation_test$p.value
+stats_table <- tibble(Test = "Pearson correlation",
+                      Variables = "Mean synaptic cleft volume vs mean mitochondrial volume",
+                      n = nrow(analysis_df), `Pearson r` = sprintf("%.3f", pearson_r), `p value` = format_p(p_value))
+stats_table
+```
+
+## Plot
+
+```{r fig-1j-plot, fig.width=20, fig.height=16}
+set.seed(20261109)
+stats_label <- paste0("r = ", sprintf("%.3f", pearson_r),
+                      "\np ", ifelse(p_value < 0.0001, "< 0.0001", paste0("= ", sprintf("%.4f", p_value))),
+                      "\nn = ", nrow(analysis_df))
+fig1j_plot <- ggplot(analysis_df, aes(plot_cleft_volume, mito_vol_um3)) +
+  geom_point(shape = 16, size = 15, alpha = 0.8, color = "grey20") +
+  geom_smooth(method = "lm", formula = y ~ x, se = TRUE, level = 0.95,
+              color = "black", fill = "grey60", linewidth = 5, alpha = 0.3) +
+  annotate("text", x = 0.55, y = 0.66, label = stats_label,
+           hjust = 0, vjust = 1, size = 20, color = "black", fontface = "bold") +
+  scale_x_continuous(oob = scales::oob_keep, breaks = c(0.5, 1, 1.5, 2), limits = c(0.5, 1.8), expand = c(0, 0)) +
+  scale_y_continuous(oob = scales::oob_keep, breaks = c(0, 0.2, 0.4, 0.6), limits = c(0, 0.7), expand = c(0, 0)) +
+  labs(x = expression(spine~size~10^{-3}~group("(", mu*m^3, ")")),
+       y = expression(mito~volume~10^{-1}~group("(", mu*m^3, ")"))) + figure_theme(60, 80)
+fig1j_plot
+```
+
+```{r fig-1j-save, include=FALSE}
+output_file <- "./Graphs/Fig 1J.png"
+ggsave(output_file, fig1j_plot, width = 20, height = 16, units = "in", dpi = 300)
+tibble(Figure = "Fig 1J", File = output_file)
+```

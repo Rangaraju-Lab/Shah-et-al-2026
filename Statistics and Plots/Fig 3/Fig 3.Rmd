@@ -1,0 +1,637 @@
+---
+title: "Figure 3: Juxtaspinal mitochondrial ultrastructure"
+knit: (function(inputFile, encoding) { inputFile <- normalizePath(inputFile); oldwd <- setwd(dirname(inputFile)); on.exit(setwd(oldwd)); rmarkdown::render(basename(inputFile), encoding = encoding, output_file = "Fig 3.html", knit_root_dir = getwd()) })
+output:
+  html_document:
+    theme: darkly
+    highlight: breezedark
+    df_print: paged
+    toc: true
+    toc_depth: 1
+    toc_float: true
+    code_folding: hide
+    self_contained: true
+    mathjax: null
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  fig.width = 30,
+  fig.height = 20,
+  fig.retina = 1,
+  out.width = "100%",
+  fig.align = "center"
+)
+
+suppressPackageStartupMessages({
+  library(dplyr)
+  library(readr)
+  library(ggplot2)
+  library(ggbeeswarm)
+  library(ggtext)
+  library(afex)
+  library(emmeans)
+})
+
+set.seed(20261109)
+options(width = 120, dplyr.summarise.inform = FALSE)
+options(contrasts = c("contr.treatment", "contr.poly"))
+
+```
+
+# Fig 3D
+
+Inner mitochondrial membrane (IMM) surface area in reconstructed juxtaspinal mitochondrial regions.
+
+**Source data**  
+`Fig 3D, E.csv`
+
+**Columns**
+
+- `Date` — Experiment date
+- `Condition` — Control or TTX
+- `Mito` — Mitochondrial reconstruction ID
+- `IMM_surf_um2` — Inner mitochondrial membrane surface area (µm²)
+
+## Data
+
+```{r fig-3d-data}
+condition_order <- c("Control", "TTX")
+spacing_map <- c("Control" = 1, "TTX" = 2.2)
+
+Density <- read_csv("./Fig 3D, E.csv", show_col_types = FALSE) %>%
+  filter(Condition %in% condition_order) %>%
+  mutate(
+    Condition = factor(Condition, levels = condition_order),
+    Date = factor(trimws(as.character(Date))),
+    IMM_surf_um2 = as.numeric(IMM_surf_um2),
+    x_pos = unname(spacing_map[as.character(Condition)]),
+    color_key = paste(Condition, Date, sep = "_")
+  ) %>%
+  filter(is.finite(IMM_surf_um2))
+
+if (nrow(Density) == 0) stop("No valid observations remain.")
+
+Density %>%
+  mutate(across(where(is.numeric), ~ round(.x, 3)))
+```
+
+## Summary
+
+```{r fig-3d-summary}
+summary_table <- Density %>%
+  group_by(Condition) %>%
+  summarise(
+    n_Mitochondria = n(),
+    n_Experiment_Dates = n_distinct(Date),
+    `Mean (SE)` = sprintf("%.3f (%.3f)", mean(IMM_surf_um2), sd(IMM_surf_um2) / sqrt(n())),
+    .groups = "drop"
+  )
+
+summary_table
+```
+
+## Statistics
+
+Two-way ANOVA with condition, experiment date, and their interaction (Type I sums of squares).
+
+```{r fig-3d-statistics}
+fit_aov <- aov(IMM_surf_um2 ~ Condition * Date, data = Density)
+anova_table <- anova(fit_aov)
+condition_p <- as.numeric(anova_table["Condition", "Pr(>F)"])
+format_p <- function(p) ifelse(p < 0.0001, "<0.0001", sprintf("%.4f", p))
+
+group_means <- Density %>%
+  group_by(Condition) %>%
+  summarise(mean = mean(IMM_surf_um2), SE = sd(IMM_surf_um2) / sqrt(n()), .groups = "drop")
+
+stats_table <- tibble(
+  Test = "Two-way ANOVA",
+  Comparison = "Control vs TTX",
+  `Control mean (SE)` = sprintf("%.3f (%.3f)", group_means$mean[1], group_means$SE[1]),
+  `TTX mean (SE)` = sprintf("%.3f (%.3f)", group_means$mean[2], group_means$SE[2]),
+  `Condition p` = format_p(condition_p)
+)
+
+stats_table
+```
+
+## Plot
+
+```{r fig-3d-plot, fig.width=18, fig.height=24, fig.retina=1, out.width="100%", fig.align="center"}
+set.seed(20261109)
+p_to_stars <- function(p) case_when(
+  p < 0.0001 ~ "****", p < 0.001 ~ "***",
+  p < 0.01 ~ "**", p < 0.05 ~ "*", TRUE ~ "ns"
+)
+
+test_results <- tibble(
+  group1_x = spacing_map["Control"],
+  group2_x = spacing_map["TTX"],
+  y_position = 4.5,
+  stars = p_to_stars(condition_p)
+) %>%
+  filter(stars != "ns")
+
+date_levels <- levels(Density$Date)
+
+date_colors <- c(
+  setNames(rep(c("#1A1A1A", "#4D4D4D", "#6F7C80"), length.out = length(date_levels)),
+           paste("Control", date_levels, sep = "_")),
+  setNames(rep(c("#8A5700", "#FFB703", "#C5B358"), length.out = length(date_levels)),
+           paste("TTX", date_levels, sep = "_"))
+)
+
+fig3d_plot <- ggplot(Density, aes(x_pos, IMM_surf_um2, color = color_key)) +
+  ggbeeswarm::geom_beeswarm(cex = 8, priority = "random", size = 30,
+                            alpha = 1, corral = "random") +
+  geom_boxplot(aes(group = x_pos), fill = NA, width = 1, outlier.shape = NA,
+               linewidth = 2, color = "black") +
+  stat_summary(aes(group = x_pos), fun = mean, geom = "point",
+               shape = 15, size = 30, color = "black") +
+  geom_segment(data = test_results,
+               aes(x = group1_x, xend = group2_x, y = y_position, yend = y_position),
+               inherit.aes = FALSE, linewidth = 2, color = "black") +
+  geom_text(data = test_results,
+            aes(x = (group1_x + group2_x) / 2, y = y_position + 0.1, label = stars),
+            inherit.aes = FALSE, size = 35, color = "black", fontface = "bold") +
+  scale_x_continuous(breaks = unname(spacing_map),
+                     labels = c("control", "homeostatic\nplasticity")) +
+  scale_color_manual(values = date_colors) +
+  scale_y_continuous(oob = scales::oob_keep, breaks = c(0, 1, 2, 3, 4), limits = c(0, 5), expand = c(0, 0)) +
+  labs(x = "", y = expression(IMM~surface~area~group("(", mu*m^2, ")"))) +
+  theme_classic() +
+  theme(
+    axis.title = element_text(size = 80, color = "black"),
+    axis.text = element_text(size = 80, color = "black"),
+    axis.ticks = element_line(linewidth = 5, color = "black"),
+    axis.ticks.length = grid::unit(0.5, "cm"),
+    axis.line = element_line(linewidth = 2, color = "black"),
+    legend.position = "none"
+  )
+
+fig3d_plot
+```
+
+```{r fig-3d-save, include=FALSE}
+dir.create("./Graphs", recursive = TRUE, showWarnings = FALSE)
+
+output_file <- "./Graphs/Fig 3D.png"
+
+ggsave(output_file, fig3d_plot, width = 18, height = 24, units = "in", dpi = 300)
+
+tibble(Figure = "Fig 3D", File = output_file)
+```
+
+# Fig 3E
+
+Cristae membrane (CM) surface area in reconstructed juxtaspinal mitochondrial regions.
+
+**Source data**  
+`Fig 3D, E.csv`
+
+**Columns**
+
+- `Date` — Experiment date
+- `Condition` — Control or TTX
+- `Mito` — Mitochondrial reconstruction ID
+- `CM_surf_um2` — Crista membrane surface area (µm²)
+
+## Data
+
+```{r fig-3e-data}
+condition_order <- c("Control", "TTX")
+spacing_map <- c("Control" = 1, "TTX" = 2.2)
+
+Density <- read_csv("./Fig 3D, E.csv", show_col_types = FALSE) %>%
+  filter(Condition %in% condition_order) %>%
+  mutate(
+    Condition = factor(Condition, levels = condition_order),
+    Date = factor(trimws(as.character(Date))),
+    CM_surf_um2 = as.numeric(CM_surf_um2),
+    x_pos = unname(spacing_map[as.character(Condition)]),
+    color_key = paste(Condition, Date, sep = "_")
+  ) %>%
+  filter(is.finite(CM_surf_um2))
+
+if (nrow(Density) == 0) stop("No valid observations remain.")
+
+Density %>%
+  mutate(across(where(is.numeric), ~ round(.x, 3)))
+```
+
+## Summary
+
+```{r fig-3e-summary}
+summary_table <- Density %>%
+  group_by(Condition) %>%
+  summarise(
+    n_Mitochondria = n(),
+    n_Experiment_Dates = n_distinct(Date),
+    `Mean (SE)` = sprintf("%.3f (%.3f)", mean(CM_surf_um2), sd(CM_surf_um2) / sqrt(n())),
+    .groups = "drop"
+  )
+
+summary_table
+```
+
+## Statistics
+
+Two-way ANOVA with condition, experiment date, and their interaction (Type I sums of squares).
+
+```{r fig-3e-statistics}
+fit_aov <- aov(CM_surf_um2 ~ Condition * Date, data = Density)
+anova_table <- anova(fit_aov)
+condition_p <- as.numeric(anova_table["Condition", "Pr(>F)"])
+format_p <- function(p) ifelse(p < 0.0001, "<0.0001", sprintf("%.4f", p))
+
+group_means <- Density %>%
+  group_by(Condition) %>%
+  summarise(mean = mean(CM_surf_um2), SE = sd(CM_surf_um2) / sqrt(n()), .groups = "drop")
+
+stats_table <- tibble(
+  Test = "Two-way ANOVA",
+  Comparison = "Control vs TTX",
+  `Control mean (SE)` = sprintf("%.3f (%.3f)", group_means$mean[1], group_means$SE[1]),
+  `TTX mean (SE)` = sprintf("%.3f (%.3f)", group_means$mean[2], group_means$SE[2]),
+  `Condition p` = format_p(condition_p)
+)
+
+stats_table
+```
+
+## Plot
+
+```{r fig-3e-plot, fig.width=18, fig.height=24, fig.retina=1, out.width="100%", fig.align="center"}
+set.seed(20261109)
+p_to_stars <- function(p) case_when(
+  p < 0.0001 ~ "****", p < 0.001 ~ "***",
+  p < 0.01 ~ "**", p < 0.05 ~ "*", TRUE ~ "ns"
+)
+
+test_results <- tibble(
+  group1_x = spacing_map["Control"],
+  group2_x = spacing_map["TTX"],
+  y_position = 3.2,
+  stars = p_to_stars(condition_p)
+) %>%
+  filter(stars != "ns")
+
+date_levels <- levels(Density$Date)
+
+date_colors <- c(
+  setNames(rep(c("#1A1A1A", "#4D4D4D", "#6F7C80"), length.out = length(date_levels)),
+           paste("Control", date_levels, sep = "_")),
+  setNames(rep(c("#8A5700", "#FFB703", "#C5B358"), length.out = length(date_levels)),
+           paste("TTX", date_levels, sep = "_"))
+)
+
+fig3e_plot <- ggplot(Density, aes(x_pos, CM_surf_um2, color = color_key)) +
+  ggbeeswarm::geom_beeswarm(cex = 8, priority = "random", size = 30,
+                            alpha = 1, corral = "random") +
+  geom_boxplot(aes(group = x_pos), fill = NA, width = 1, outlier.shape = NA,
+               linewidth = 2, color = "black") +
+  stat_summary(aes(group = x_pos), fun = mean, geom = "point",
+               shape = 15, size = 30, color = "black") +
+  geom_segment(data = test_results,
+               aes(x = group1_x, xend = group2_x, y = y_position, yend = y_position),
+               inherit.aes = FALSE, linewidth = 2, color = "black") +
+  geom_text(data = test_results,
+            aes(x = (group1_x + group2_x) / 2, y = y_position + 0.1, label = stars),
+            inherit.aes = FALSE, size = 35, color = "black", fontface = "bold") +
+  scale_x_continuous(breaks = unname(spacing_map),
+                     labels = c("control", "homeostatic\nplasticity")) +
+  scale_color_manual(values = date_colors) +
+  scale_y_continuous(oob = scales::oob_keep, 
+    breaks = c(0, 0.8, 1.6, 2.4, 3.2),
+    limits = c(0, 3.7),
+    expand = c(0, 0)
+  ) +
+  labs(x = "", y = expression(CM~surf~area~group("(", mu*m^2, ")"))) +
+  theme_classic() +
+  theme(
+    axis.title = element_text(size = 80, color = "black"),
+    axis.text = element_text(size = 80, color = "black"),
+    axis.ticks = element_line(linewidth = 5, color = "black"),
+    axis.ticks.length = grid::unit(0.5, "cm"),
+    axis.line = element_line(linewidth = 2, color = "black"),
+    legend.position = "none"
+  )
+
+fig3e_plot
+```
+
+```{r fig-3e-save, include=FALSE}
+dir.create("./Graphs", recursive = TRUE, showWarnings = FALSE)
+
+output_file <- "./Graphs/Fig 3E.png"
+
+ggsave(output_file, fig3e_plot, width = 18, height = 24, units = "in", dpi = 300)
+
+tibble(Figure = "Fig 3E", File = output_file)
+```
+
+# Fig 3F
+
+Number of crista junctions within each reconstructed juxtaspinal mitochondrial region.
+
+**Source data**  
+`Fig 3D, E.csv`, `Fig 3F.csv`
+
+**Columns**
+
+- `Date` — Experiment date
+- `Condition` — Control or TTX
+- `Mito` — Mitochondrial reconstruction ID
+- `Junction_ID` — Crista junction ID
+
+## Data
+
+Distinct junctions are counted per reconstruction. Reconstructions with no junctions contribute a count of zero.
+
+```{r fig-3f-data}
+condition_order <- c("Control", "TTX")
+spacing_map <- c("Control" = 1, "TTX" = 2.2)
+
+reconstructions <- read_csv("./Fig 3D, E.csv", show_col_types=FALSE) %>%
+  distinct(Date,Condition,Mito) %>% filter(Condition %in% condition_order)
+junction_counts <- read_csv("./Fig 3F.csv",show_col_types=FALSE) %>%
+  filter(Condition %in% condition_order,!is.na(Date),!is.na(Mito),!is.na(Junction_ID)) %>%
+  distinct(Date,Condition,Mito,Junction_ID) %>% count(Date,Condition,Mito,name="CJ_count")
+Density <- reconstructions %>% left_join(junction_counts,by=c("Date","Condition","Mito")) %>%
+  mutate(CJ_count=coalesce(CJ_count,0L),Condition=factor(Condition,levels=condition_order),
+         Date=factor(trimws(as.character(Date))),Mito=as.character(Mito),
+         x_pos=unname(spacing_map[as.character(Condition)]),color_key=paste(Condition,Date,sep="_"))
+
+if (nrow(Density) == 0) stop("No valid observations remain.")
+
+Density %>%
+  mutate(across(where(is.numeric), ~ round(.x, 3)))
+```
+
+## Summary
+
+```{r fig-3f-summary}
+summary_table <- Density %>%
+  group_by(Condition) %>%
+  summarise(
+    n_Mitochondria = n(),
+    n_Experiment_Dates = n_distinct(Date),
+    `Mean (SE)` = sprintf("%.3f (%.3f)", mean(CJ_count), sd(CJ_count) / sqrt(n())),
+    .groups = "drop"
+  )
+
+summary_table
+```
+
+## Statistics
+
+Two-way ANOVA with condition, experiment date, and their interaction (Type I sums of squares).
+
+```{r fig-3f-statistics}
+fit_aov <- aov(CJ_count ~ Condition * Date, data = Density)
+anova_table <- anova(fit_aov)
+condition_p <- as.numeric(anova_table["Condition", "Pr(>F)"])
+format_p <- function(p) ifelse(p < 0.0001, "<0.0001", sprintf("%.4f", p))
+
+group_means <- Density %>%
+  group_by(Condition) %>%
+  summarise(mean = mean(CJ_count), SE = sd(CJ_count) / sqrt(n()), .groups = "drop")
+
+stats_table <- tibble(
+  Test = "Two-way ANOVA",
+  Comparison = "Control vs TTX",
+  `Control mean (SE)` = sprintf("%.3f (%.3f)", group_means$mean[1], group_means$SE[1]),
+  `TTX mean (SE)` = sprintf("%.3f (%.3f)", group_means$mean[2], group_means$SE[2]),
+  `Condition p` = format_p(condition_p)
+)
+
+stats_table
+```
+
+## Plot
+
+```{r fig-3f-plot, fig.width=18, fig.height=24, fig.retina=1, out.width="100%", fig.align="center"}
+set.seed(20261109)
+p_to_stars <- function(p) case_when(
+  p < 0.0001 ~ "****", p < 0.001 ~ "***",
+  p < 0.01 ~ "**", p < 0.05 ~ "*", TRUE ~ "ns"
+)
+
+test_results <- tibble(
+  group1_x = spacing_map["Control"],
+  group2_x = spacing_map["TTX"],
+  y_position = 210,
+  stars = p_to_stars(condition_p)
+) %>%
+  filter(stars != "ns")
+
+date_levels <- levels(Density$Date)
+
+date_colors <- c(
+  setNames(rep(c("#1A1A1A", "#4D4D4D", "#6F7C80"), length.out = length(date_levels)),
+           paste("Control", date_levels, sep = "_")),
+  setNames(rep(c("#CBA6F7", "#7B2CBF", "#3C096C"), length.out = length(date_levels)),
+           paste("TTX", date_levels, sep = "_"))
+)
+
+fig3f_plot <- ggplot(Density, aes(x_pos, CJ_count, color = color_key)) +
+  ggbeeswarm::geom_beeswarm(cex = 8, priority = "random", size = 30,
+                            alpha = 1, corral = "random") +
+  geom_boxplot(aes(group = x_pos), fill = NA, width = 1, outlier.shape = NA,
+               linewidth = 2, color = "black") +
+  stat_summary(aes(group = x_pos), fun = mean, geom = "point",
+               shape = 15, size = 30, color = "black") +
+  geom_segment(data = test_results,
+               aes(x = group1_x, xend = group2_x, y = y_position, yend = y_position),
+               inherit.aes = FALSE, linewidth = 2, color = "black") +
+  geom_text(data = test_results,
+            aes(x = (group1_x + group2_x) / 2, y = y_position + 5, label = stars),
+            inherit.aes = FALSE, size = 35, color = "black", fontface = "bold") +
+  scale_x_continuous(breaks = unname(spacing_map),
+                     labels = c("control", "homeostatic\nplasticity")) +
+  scale_color_manual(values = date_colors) +
+  scale_y_continuous(oob = scales::oob_keep, 
+    breaks = c(0, 50, 100, 150, 200),
+    limits = c(0, 230),
+    expand = c(0, 0)
+  ) +
+  labs(x = "", y = "cristae junctions") +
+  theme_classic() +
+  theme(
+    axis.title = element_text(size = 80, color = "black"),
+    axis.text = element_text(size = 80, color = "black"),
+    axis.ticks = element_line(linewidth = 5, color = "black"),
+    axis.ticks.length = grid::unit(0.5, "cm"),
+    axis.line = element_line(linewidth = 2, color = "black"),
+    legend.position = "none"
+  )
+
+fig3f_plot
+```
+
+```{r fig-3f-save, include=FALSE}
+dir.create("./Graphs", recursive = TRUE, showWarnings = FALSE)
+
+output_file <- "./Graphs/Fig 3F.png"
+
+ggsave(output_file, fig3f_plot, width = 18, height = 24, units = "in", dpi = 300)
+
+tibble(Figure = "Fig 3F", File = output_file)
+```
+
+# Fig 3H
+
+Surface area of high-curvature cristae membrane in reconstructed juxtaspinal mitochondrial regions.
+
+**Source data**  
+`Fig 3H.csv`
+
+**Columns**
+
+- `Date` — Experiment date
+- `Condition` — Control or TTX
+- `Mito` — Mitochondrial reconstruction ID
+- `CM_highk1_um2` — Crista membrane area at high principal curvature (µm²)
+
+## Data
+
+High curvature corresponds to first principal curvature greater than 80 µm⁻¹.
+
+```{r fig-3h-data}
+condition_order <- c("Control", "TTX")
+spacing_map <- c("Control" = 1, "TTX" = 2.2)
+
+Density <- read_csv("./Fig 3H.csv", show_col_types = FALSE) %>%
+  filter(Condition %in% condition_order) %>%
+  mutate(
+    Condition = factor(Condition, levels = condition_order),
+    Date = factor(trimws(as.character(Date))),
+    CM_highk1_um2 = as.numeric(CM_highk1_um2),
+    x_pos = unname(spacing_map[as.character(Condition)]),
+    color_key = paste(Condition, Date, sep = "_")
+  ) %>%
+  filter(is.finite(CM_highk1_um2))
+
+if (nrow(Density) == 0) stop("No valid observations remain.")
+
+Density %>%
+  mutate(across(where(is.numeric), ~ round(.x, 3)))
+```
+
+## Summary
+
+```{r fig-3h-summary}
+summary_table <- Density %>%
+  group_by(Condition) %>%
+  summarise(
+    n_Mitochondria = n(),
+    n_Experiment_Dates = n_distinct(Date),
+    `Mean (SE)` = sprintf("%.3f (%.3f)", mean(CM_highk1_um2), sd(CM_highk1_um2) / sqrt(n())),
+    .groups = "drop"
+  )
+
+summary_table
+```
+
+## Statistics
+
+Two-way ANOVA with condition, experiment date, and their interaction (Type I sums of squares).
+
+```{r fig-3h-statistics}
+fit_aov <- aov(CM_highk1_um2 ~ Condition * Date, data = Density)
+anova_table <- anova(fit_aov)
+condition_p <- as.numeric(anova_table["Condition", "Pr(>F)"])
+format_p <- function(p) ifelse(p < 0.0001, "<0.0001", sprintf("%.4f", p))
+
+group_means <- Density %>%
+  group_by(Condition) %>%
+  summarise(mean = mean(CM_highk1_um2), SE = sd(CM_highk1_um2) / sqrt(n()), .groups = "drop")
+
+stats_table <- tibble(
+  Test = "Two-way ANOVA",
+  Comparison = "Control vs TTX",
+  `Control mean (SE)` = sprintf("%.3f (%.3f)", group_means$mean[1], group_means$SE[1]),
+  `TTX mean (SE)` = sprintf("%.3f (%.3f)", group_means$mean[2], group_means$SE[2]),
+  `Condition p` = format_p(condition_p)
+)
+
+stats_table
+```
+
+## Plot
+
+```{r fig-3h-plot, fig.width=18, fig.height=24, fig.retina=1, out.width="100%", fig.align="center"}
+set.seed(20261109)
+p_to_stars <- function(p) case_when(
+  p < 0.0001 ~ "****", p < 0.001 ~ "***",
+  p < 0.01 ~ "**", p < 0.05 ~ "*", TRUE ~ "ns"
+)
+
+test_results <- tibble(
+  group1_x = spacing_map["Control"],
+  group2_x = spacing_map["TTX"],
+  y_position = 0.63,
+  stars = p_to_stars(condition_p)
+) %>%
+  filter(stars != "ns")
+
+date_levels <- levels(Density$Date)
+
+date_colors <- c(
+  setNames(rep(c("#1A1A1A", "#4D4D4D", "#6F7C80"), length.out = length(date_levels)),
+           paste("Control", date_levels, sep = "_")),
+  setNames(rep(c("#FFA3A3", "#E63946", "#8B0000"), length.out = length(date_levels)),
+           paste("TTX", date_levels, sep = "_"))
+)
+
+fig3h_plot <- ggplot(Density, aes(x_pos, CM_highk1_um2, color = color_key)) +
+  ggbeeswarm::geom_beeswarm(cex = 9, priority = "random", size = 30,
+                            alpha = 1, corral = "random") +
+  geom_boxplot(aes(group = x_pos), fill = NA, width = 1, outlier.shape = NA,
+               linewidth = 2, color = "black") +
+  stat_summary(aes(group = x_pos), fun = mean, geom = "point",
+               shape = 15, size = 30, color = "black") +
+  geom_segment(data = test_results,
+               aes(x = group1_x, xend = group2_x, y = y_position, yend = y_position),
+               inherit.aes = FALSE, linewidth = 2, color = "black") +
+  geom_text(data = test_results,
+            aes(x = (group1_x + group2_x) / 2, y = y_position + 0.02, label = stars),
+            inherit.aes = FALSE, size = 35, color = "black", fontface = "bold") +
+  scale_x_continuous(breaks = unname(spacing_map),
+                     labels = c("control", "homeostatic\nplasticity")) +
+  scale_color_manual(values = date_colors) +
+  scale_y_continuous(oob = scales::oob_keep, 
+    breaks = c(0, 0.2, 0.4, 0.6),
+    limits = c(0, 0.68),
+    expand = c(0, 0)
+  ) +
+  labs(
+    x = "",
+    y = expression(atop(high~curvature~CM, surf~area~group("(", mu*m^2, ")")))
+  ) +
+  theme_classic() +
+  theme(
+    axis.title = element_text(size = 80, color = "black"),
+    axis.text = element_text(size = 80, color = "black"),
+    axis.ticks = element_line(linewidth = 5, color = "black"),
+    axis.ticks.length = grid::unit(0.5, "cm"),
+    axis.line = element_line(linewidth = 2, color = "black"),
+    legend.position = "none"
+  )
+
+fig3h_plot
+```
+
+```{r fig-3h-save, include=FALSE}
+dir.create("./Graphs", recursive = TRUE, showWarnings = FALSE)
+
+output_file <- "./Graphs/Fig 3H.png"
+
+ggsave(output_file, fig3h_plot, width = 18, height = 24, units = "in", dpi = 300)
+
+tibble(Figure = "Fig 3H", File = output_file)
+```

@@ -1,0 +1,1086 @@
+---
+title: "Figure S1: Morphology and electrophysiology controls"
+knit: (function(inputFile, encoding) { inputFile <- normalizePath(inputFile); oldwd <- setwd(dirname(inputFile)); on.exit(setwd(oldwd)); rmarkdown::render(basename(inputFile), encoding = encoding, output_file = "Fig S1.html", knit_root_dir = getwd()) })
+output:
+  html_document:
+    theme: darkly
+    highlight: breezedark
+    df_print: paged
+    toc: true
+    toc_depth: 1
+    toc_float: true
+    code_folding: hide
+    self_contained: true
+    mathjax: null
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE,
+                      fig.width = 30, fig.height = 20, fig.retina = 1,
+                      out.width = "100%", fig.align = "center")
+
+set.seed(20261109)
+options(width = 120, dplyr.summarise.inform = FALSE)
+options(contrasts = c("contr.treatment", "contr.poly"))
+
+```
+
+# Fig S1B
+
+Cumulative distribution of mEPSC event peak amplitudes following homeostatic plasticity.
+
+**Source data**  
+`Fig S1B.csv`
+
+**Columns**
+
+- `Date` — Experiment date
+- `Condition` — Control or TTX
+- `Cell` — Cell ID
+- `Peak_Amp` — Signed mEPSC peak amplitude (pA)
+
+## Data
+
+```{r fig-s1b-data}
+suppressPackageStartupMessages({
+  library(dplyr); library(readr); library(ggplot2)
+})
+
+Events <- read_csv("./Fig S1B.csv", show_col_types = FALSE) %>%
+  transmute(Date = trimws(as.character(Date)), Condition = as.character(Condition),
+            Cell = as.character(Cell), Peak_Amp = as.numeric(Peak_Amp)) %>%
+  filter(Condition %in% c("Control", "TTX"), is.finite(Peak_Amp)) %>%
+  mutate(Condition = factor(Condition, levels = c("Control", "TTX")))
+
+if (n_distinct(Events$Condition) != 2) stop("Both Control and TTX events are required.")
+Events %>% mutate(Peak_Amp = round(Peak_Amp, 3))
+```
+
+## Summary
+
+```{r fig-s1b-summary}
+summary_table <- Events %>% group_by(Condition) %>%
+  summarise(n_Events = n(), n_Cells = n_distinct(Date, Cell),
+            n_Experiment_Dates = n_distinct(Date), .groups = "drop")
+summary_table
+```
+
+## Statistics
+
+Two-sided Kolmogorov–Smirnov test on signed event amplitudes.
+
+```{r fig-s1b-statistics}
+ks_result <- ks.test(Events$Peak_Amp[Events$Condition == "Control"],
+                     Events$Peak_Amp[Events$Condition == "TTX"])
+format_p <- function(p) ifelse(p < 0.0001, "<0.0001", sprintf("%.4f", p))
+
+stats_table <- tibble(
+  Test = "Two-sample Kolmogorov-Smirnov test",
+  Comparison = "Control vs TTX",
+  `KS statistic (D)` = round(unname(ks_result$statistic), 4),
+  `p value` = format_p(ks_result$p.value)
+)
+stats_table
+```
+
+## Plot
+
+```{r fig-s1b-plot, fig.width=22, fig.height=20}
+set.seed(20261109)
+figs1b_plot <- ggplot(Events, aes(Peak_Amp, color = Condition)) +
+  stat_ecdf(geom = "line", linewidth = 7) +
+  annotate("text", x = -20, y = 0.5, label = "control",
+           color = "#9E9E9E", hjust = 0, size = 30) +
+  annotate("text", x = -20, y = 0.3, label = paste0("homeostatic\nplasticity", ifelse(ks_result$p.value < 0.0001,"****",ifelse(ks_result$p.value < 0.001,"***",ifelse(ks_result$p.value < 0.01,"**",ifelse(ks_result$p.value < 0.05,"*","ns"))))),
+           color = "#1A1A1A", hjust = 0, size = 30) +
+  scale_x_reverse(oob = scales::oob_keep, limits = c(0, -55), breaks = seq(-10, -50, by = -10),
+                expand = c(0, 0)) +
+  scale_y_continuous(oob = scales::oob_keep, limits = c(0, 1.03), breaks = seq(0, 1, 0.2),
+                     labels = function(x) x * 100, expand = c(0, 0)) +
+  scale_color_manual(values = c(Control = "#9E9E9E", TTX = "#1A1A1A")) +
+  labs(x = "peak amplitude (pA)", y = "% of events") +
+  theme_classic() +
+  theme(axis.title = element_text(size = 80, color = "black"),
+        axis.text = element_text(size = 80, color = "black"),
+        axis.ticks = element_line(linewidth = 5, color = "black"),
+        axis.ticks.length = grid::unit(0.5, "cm"),
+        axis.line = element_line(linewidth = 2, color = "black"),
+        legend.position = "none")
+figs1b_plot
+```
+
+```{r fig-s1b-save, include=FALSE}
+dir.create("./Graphs", recursive = TRUE, showWarnings = FALSE)
+ggsave("./Graphs/Fig S1B.png", figs1b_plot, width = 22, height = 20,
+       units = "in", dpi = 300)
+tibble(Figure = "Fig S1B", File = "./Graphs/Fig S1B.png")
+```
+
+# Fig S1C
+
+Mean spine area per cell following homeostatic plasticity.
+
+**update for 2026 pending** — The analysis includes 43 treated cells. The v3 legend reports 45.
+
+**Source data**  
+`Fig S1C.csv`
+
+**Columns**
+
+- `Date` — Experiment date
+- `Condition` — Control or TTX
+- `Dish` — Culture dish ID
+- `Cell` — Cell ID
+- `spine_area_um2` — Mean spine area per cell (µm²)
+
+## Data
+
+```{r fig-s1c-data}
+suppressPackageStartupMessages({
+  library(dplyr); library(readr); library(ggplot2); library(ggtext)
+})
+
+spacing_map <- c(Control = 1, TTX = 2.2)
+spine_df <- read_csv("./Fig S1C.csv", show_col_types = FALSE) %>%
+  select(Date, Condition, Dish, Cell, spine_area_um2) %>%
+  mutate(Condition = trimws(as.character(Condition)),
+         Condition = case_when(grepl("^Control", Condition, ignore.case = TRUE) ~ "Control",
+                               grepl("^TTX", Condition, ignore.case = TRUE) ~ "TTX",
+                               TRUE ~ Condition),
+         Date = trimws(as.character(Date)),
+         spine_area_um2 = as.numeric(spine_area_um2)) %>%
+  filter(Condition %in% names(spacing_map), Date != "", is.finite(spine_area_um2)) %>%
+  mutate(Condition = factor(Condition, levels = names(spacing_map)),
+         Date = factor(Date), Date_Condition = paste(Condition, Date, sep = "_"),
+         x_pos = unname(spacing_map[as.character(Condition)]))
+
+if (n_distinct(spine_df$Condition) < 2 || n_distinct(spine_df$Date) < 2)
+  stop("Both conditions and at least two dates are required.")
+
+spine_df %>%
+  select(Date, Condition, Dish, Cell, spine_area_um2) %>%
+  mutate(spine_area_um2 = round(spine_area_um2, 3))
+```
+
+## Summary
+
+```{r fig-s1c-summary}
+summary_table <- spine_df %>% group_by(Condition) %>%
+  summarise(n_Cells = n_distinct(Date, Dish, Cell), n_Experiment_Dates = n_distinct(Date),
+            `Mean (SE)` = sprintf("%.3f (%.3f)", mean(spine_area_um2),
+                                  sd(spine_area_um2) / sqrt(n())), .groups = "drop")
+summary_table
+```
+
+## Statistics
+
+Two-way ANOVA with condition, experiment date, and their interaction (Type I sums of squares).
+
+```{r fig-s1c-statistics}
+fit_aov <- aov(spine_area_um2 ~ Condition * Date, data = spine_df)
+condition_p <- as.numeric(anova(fit_aov)["Condition", "Pr(>F)"])
+format_p <- function(p) ifelse(p < 0.0001, "<0.0001", sprintf("%.4f", p))
+
+stats_table <- tibble(
+  Test = "Two-way ANOVA", Comparison = "Control vs TTX",
+  `Control mean (SE)` = summary_table$`Mean (SE)`[summary_table$Condition == "Control"],
+  `TTX mean (SE)` = summary_table$`Mean (SE)`[summary_table$Condition == "TTX"],
+  `Condition p` = format_p(condition_p)
+)
+stats_table
+
+anova(fit_aov)
+```
+
+## Plot
+
+```{r fig-s1c-plot, fig.width=18, fig.height=20}
+set.seed(20261109)
+date_levels <- levels(spine_df$Date)
+date_colors <- c(
+  setNames(rep(c("#999999", "#E0E0E0", "#C8C8C8"), length.out = length(date_levels)),
+           paste("Control", date_levels, sep = "_")),
+  setNames(rep(c("#000000", "#606060", "#303030"), length.out = length(date_levels)),
+           paste("TTX", date_levels, sep = "_"))
+)
+
+test_results <- tibble(
+  group1_x = spacing_map["Control"], group2_x = spacing_map["TTX"],
+  y_position = 0.8,
+  stars = case_when(condition_p < 0.001 ~ "***", condition_p < 0.01 ~ "**",
+                    condition_p < 0.05 ~ "*", TRUE ~ "ns")
+)
+
+figs1c_plot <- ggplot(spine_df, aes(x_pos, spine_area_um2, color = Date_Condition)) +
+  ggbeeswarm::geom_beeswarm(cex = 5, priority = "random", size = 20, corral = "random") +
+  geom_boxplot(aes(group = x_pos), fill = NA, width = 1, outlier.shape = NA,
+               linewidth = 2, color = "black") +
+  stat_summary(aes(group = x_pos), fun = mean, geom = "point",
+               shape = 15, size = 20, color = "black") +
+  geom_segment(data = test_results,
+               aes(x = group1_x, xend = group2_x, y = y_position, yend = y_position),
+               inherit.aes = FALSE, linewidth = 2, color = "black") +
+  geom_text(data = test_results,
+            aes(x = (group1_x + group2_x) / 2, y = y_position + 0.02, label = stars),
+            inherit.aes = FALSE, size = 25, color = "black") +
+  scale_x_continuous(breaks = unname(spacing_map),
+                     labels = c("control", "homeostatic\nplasticity")) +
+  scale_color_manual(values = date_colors) +
+  scale_y_continuous(oob = scales::oob_keep, breaks = c(0.2, 0.4, 0.6, 0.8),
+                     limits = c(0.2, 0.85), expand = c(0, 0)) +
+  labs(x = NULL, y = "mean spine area (&micro;m<sup>2</sup>)") +
+  theme_classic() +
+  theme(axis.title.y = ggtext::element_markdown(size = 80, color = "black"),
+        axis.text = element_text(size = 80, color = "black"),
+        axis.ticks = element_line(linewidth = 5, color = "black"),
+        axis.ticks.length = grid::unit(0.5, "cm"),
+        axis.line = element_line(linewidth = 2, color = "black"),
+        legend.position = "none")
+figs1c_plot
+```
+
+```{r fig-s1c-save, include=FALSE}
+dir.create("./Graphs", recursive = TRUE, showWarnings = FALSE)
+ggsave("./Graphs/Fig S1C.png", figs1c_plot, width = 18, height = 20,
+       units = "in", dpi = 300)
+tibble(Figure = "Fig S1C", File = "./Graphs/Fig S1C.png")
+```
+
+# Fig S1D
+
+Mean dendritic mitochondrial length following homeostatic plasticity.
+
+**Source data**  
+`Fig S1D.csv`
+
+**Columns**
+
+- `Date` — Experiment date
+- `Condition` — Control or TTX
+- `Cell` — Cell ID
+- `mean_mito_len` — Mean mitochondrial length per cell (µm)
+
+## Data
+
+```{r fig-s1d-data}
+suppressPackageStartupMessages({
+  library(dplyr); library(readr); library(ggplot2); library(ggbeeswarm)
+})
+
+spacing_map <- c(Control = 1, TTX = 2.2)
+mito_df <- read_csv("./Fig S1D.csv", show_col_types = FALSE) %>%
+  select(Date, Condition, Cell, mean_mito_len) %>%
+  mutate(Date = trimws(as.character(Date)), Condition = trimws(as.character(Condition)),
+         mean_mito_len = as.numeric(mean_mito_len)) %>%
+  filter(Condition %in% names(spacing_map), Date != "", is.finite(mean_mito_len)) %>%
+  mutate(Date = factor(Date), Condition = factor(Condition, levels = names(spacing_map)),
+         Date_Condition = paste(Condition, Date, sep = "_"),
+         x_pos = unname(spacing_map[as.character(Condition)]))
+
+if (n_distinct(mito_df$Condition) < 2 || n_distinct(mito_df$Date) < 2)
+  stop("Both conditions and at least two dates are required.")
+
+mito_df %>% select(Date, Condition, Cell, mean_mito_len) %>%
+  mutate(mean_mito_len = round(mean_mito_len, 3))
+```
+
+## Summary
+
+```{r fig-s1d-summary}
+summary_table <- mito_df %>% group_by(Condition) %>%
+  summarise(n_Observations = n(), n_Cells = n_distinct(Date, Cell),
+            n_Experiment_Dates = n_distinct(Date),
+            `Mean (SE)` = sprintf("%.3f (%.3f)", mean(mean_mito_len),
+                                  sd(mean_mito_len) / sqrt(n())), .groups = "drop")
+summary_table
+```
+
+## Statistics
+
+Two-way ANOVA with condition, experiment date, and their interaction (Type I sums of squares).
+
+```{r fig-s1d-statistics}
+fit_aov <- aov(mean_mito_len ~ Condition * Date, data = mito_df)
+condition_p <- as.numeric(anova(fit_aov)["Condition", "Pr(>F)"])
+format_p <- function(p) ifelse(p < 0.0001, "<0.0001", sprintf("%.4f", p))
+
+stats_table <- tibble(
+  Test = "Two-way ANOVA", Comparison = "Control vs TTX",
+  `Control mean (SE)` = summary_table$`Mean (SE)`[summary_table$Condition == "Control"],
+  `TTX mean (SE)` = summary_table$`Mean (SE)`[summary_table$Condition == "TTX"],
+  `Condition p` = format_p(condition_p)
+)
+stats_table
+
+anova(fit_aov)
+```
+
+## Plot
+
+```{r fig-s1d-plot, fig.width=20, fig.height=16}
+set.seed(20261109)
+date_levels <- levels(mito_df$Date)
+date_colors <- c(
+  setNames(rep(c("#1A1A1A", "#4D4D4D", "#777B7E"), length.out = length(date_levels)),
+           paste("Control", date_levels, sep = "_")),
+  setNames(rep(c("#009A00", "#00DC00", "#66FF66"), length.out = length(date_levels)),
+           paste("TTX", date_levels, sep = "_"))
+)
+test_results <- tibble(
+  group1_x = spacing_map["Control"], group2_x = spacing_map["TTX"], y_position = 32,
+  stars = case_when(condition_p < 0.001 ~ "***", condition_p < 0.01 ~ "**",
+                    condition_p < 0.05 ~ "*", TRUE ~ "ns")
+)
+
+figs1d_plot <- ggplot(mito_df, aes(x_pos, mean_mito_len, color = Date_Condition)) +
+  ggbeeswarm::geom_beeswarm(cex = 5, priority = "random", size = 20, corral = "random") +
+  geom_boxplot(aes(group = x_pos), fill = NA, width = 1, outlier.shape = NA,
+               linewidth = 2, color = "black") +
+  stat_summary(aes(group = x_pos), fun = mean, geom = "point",
+               shape = 15, size = 20, color = "black") +
+  geom_segment(data = test_results,
+               aes(x = group1_x, xend = group2_x, y = y_position, yend = y_position),
+               inherit.aes = FALSE, linewidth = 2, color = "black") +
+  geom_text(data = test_results,
+            aes(x = (group1_x + group2_x) / 2, y = y_position + 0.8, label = stars),
+            inherit.aes = FALSE, size = 25, color = "black") +
+  scale_x_continuous(breaks = unname(spacing_map),
+                     labels = c("control", "homeostatic\nplasticity")) +
+  scale_color_manual(values = date_colors) +
+  scale_y_continuous(oob = scales::oob_keep, breaks = c(0, 10, 20, 30),
+                     limits = c(0, 35), expand = c(0, 0)) +
+  labs(x = NULL, y = "dendritic mito length (µm)") +
+  theme_classic() +
+  theme(axis.title = element_text(size = 80, color = "black"),
+        axis.text = element_text(size = 80, color = "black"),
+        axis.ticks = element_line(linewidth = 5, color = "black"),
+        axis.ticks.length = grid::unit(0.5, "cm"),
+        axis.line = element_line(linewidth = 2, color = "black"),
+        legend.position = "none")
+figs1d_plot
+```
+
+```{r fig-s1d-save, include=FALSE}
+dir.create("./Graphs", recursive = TRUE, showWarnings = FALSE)
+ggsave("./Graphs/Fig S1D.png", figs1d_plot, width = 20, height = 16,
+       units = "in", dpi = 300)
+tibble(Figure = "Fig S1D", File = "./Graphs/Fig S1D.png")
+```
+
+# Fig S1E
+
+Mean axonal mitochondrial length following homeostatic plasticity.
+
+**Source data**  
+`Fig S1E.csv`
+
+**Columns**
+
+- `Date` — Experiment date
+- `Condition` — Control or TTX
+- `Dish` — Culture dish ID
+- `Cell` — Cell ID
+- `mito_length_um` — Axonal mitochondrial length per cell (µm)
+
+## Data
+
+```{r fig-s1e-data}
+suppressPackageStartupMessages({
+  library(dplyr); library(readr); library(ggplot2); library(ggbeeswarm); library(ggtext)
+})
+
+spacing_map <- c(Control = 1, TTX = 2.2)
+mito_df <- read_csv("./Fig S1E.csv", show_col_types = FALSE) %>%
+  select(Date, Condition, Dish, Cell, mito_length_um) %>%
+  mutate(Date = trimws(as.character(Date)), Condition = trimws(as.character(Condition)),
+         mito_length_um = as.numeric(mito_length_um)) %>%
+  filter(Condition %in% names(spacing_map), Date != "", is.finite(mito_length_um)) %>%
+  mutate(Date = factor(Date), Condition = factor(Condition, levels = names(spacing_map)),
+         Date_Condition = paste(Condition, Date, sep = "_"),
+         x_pos = unname(spacing_map[as.character(Condition)]))
+
+if (n_distinct(mito_df$Condition) < 2 || n_distinct(mito_df$Date) < 2)
+  stop("Both conditions and at least two dates are required.")
+
+mito_df %>% select(Date, Condition, Dish, Cell, mito_length_um) %>%
+  mutate(mito_length_um = round(mito_length_um, 3))
+```
+
+## Summary
+
+```{r fig-s1e-summary}
+summary_table <- mito_df %>% group_by(Condition) %>%
+  summarise(n_Mitochondria = n(), n_Cells = n_distinct(Date, Dish, Cell),
+            n_Experiment_Dates = n_distinct(Date),
+            `Mean (SE)` = sprintf("%.3f (%.3f)", mean(mito_length_um),
+                                  sd(mito_length_um) / sqrt(n())), .groups = "drop")
+summary_table
+```
+
+## Statistics
+
+Two-way ANOVA with condition, experiment date, and their interaction (Type I sums of squares).
+
+```{r fig-s1e-statistics}
+fit_aov <- aov(mito_length_um ~ Condition * Date, data = mito_df)
+condition_p <- as.numeric(anova(fit_aov)["Condition", "Pr(>F)"])
+format_p <- function(p) ifelse(p < 0.0001, "<0.0001", sprintf("%.4f", p))
+
+stats_table <- tibble(
+  Test = "Two-way ANOVA", Comparison = "Control vs TTX",
+  `Control mean (SE)` = summary_table$`Mean (SE)`[summary_table$Condition == "Control"],
+  `TTX mean (SE)` = summary_table$`Mean (SE)`[summary_table$Condition == "TTX"],
+  `Condition p` = format_p(condition_p)
+)
+stats_table
+
+anova(fit_aov)
+```
+
+## Plot
+
+```{r fig-s1e-plot, fig.width=20, fig.height=16}
+set.seed(20261109)
+date_levels <- levels(mito_df$Date)
+date_colors <- c(
+  setNames(rep(c("#1A1A1A", "#4D4D4D", "#777B7E"), length.out = length(date_levels)),
+           paste("Control", date_levels, sep = "_")),
+  setNames(rep(c("#009A00", "#00DC00", "#66FF66"), length.out = length(date_levels)),
+           paste("TTX", date_levels, sep = "_"))
+)
+test_results <- tibble(
+  group1_x = spacing_map["Control"], group2_x = spacing_map["TTX"], y_position = 1.25,
+  stars = case_when(condition_p < 0.001 ~ "***", condition_p < 0.01 ~ "**",
+                    condition_p < 0.05 ~ "*", TRUE ~ "ns")
+) %>% filter(stars != "ns")
+
+figs1e_plot <- ggplot(mito_df, aes(x_pos, mito_length_um, color = Date_Condition)) +
+  ggbeeswarm::geom_beeswarm(cex = 5, priority = "random", size = 20, corral = "random") +
+  geom_boxplot(aes(group = x_pos), fill = NA, width = 1, outlier.shape = NA,
+               linewidth = 2, color = "black") +
+  stat_summary(aes(group = x_pos), fun = mean, geom = "point",
+               shape = 15, size = 20, color = "black") +
+  geom_segment(data = test_results,
+               aes(x = group1_x, xend = group2_x, y = y_position, yend = y_position),
+               inherit.aes = FALSE, linewidth = 2, color = "black") +
+  geom_text(data = test_results,
+            aes(x = (group1_x + group2_x) / 2, y = y_position + 0.05, label = stars),
+            inherit.aes = FALSE, size = 25, color = "black") +
+  scale_x_continuous(breaks = unname(spacing_map),
+                     labels = c("control", "homeostatic\nplasticity")) +
+  scale_color_manual(values = date_colors) +
+  scale_y_continuous(oob = scales::oob_keep, breaks = c(0.4, 0.8, 1.2),
+                     limits = c(0.1, 1.4), expand = c(0, 0)) +
+  labs(x = NULL, y = "axonal mito<br>length (&micro;m)") +
+  theme_classic() +
+  theme(axis.title.y = ggtext::element_markdown(size = 80, color = "black"),
+        axis.text = element_text(size = 80, color = "black"),
+        axis.ticks = element_line(linewidth = 5, color = "black"),
+        axis.ticks.length = grid::unit(0.5, "cm"),
+        axis.line = element_line(linewidth = 2, color = "black"),
+        legend.position = "none")
+figs1e_plot
+```
+
+```{r fig-s1e-save, include=FALSE}
+dir.create("./Graphs", recursive = TRUE, showWarnings = FALSE)
+ggsave("./Graphs/Fig S1E.png", figs1e_plot, width = 20, height = 16,
+       units = "in", dpi = 300)
+tibble(Figure = "Fig S1E", File = "./Graphs/Fig S1E.png")
+```
+
+# Fig S1F
+
+Dendritic mitochondrial length with imaging performed in the continued presence of TTX.
+
+**Source data**  
+`Fig S1F, G.csv`
+
+**Columns**
+
+- `Date` — Experiment date
+- `Condition` — Control or TTX with TTX maintained during imaging
+- `Cell` — Cell ID
+- `mean_mito_len` — Mean mitochondrial length per cell (µm)
+
+## Data
+
+```{r fig-s1f-data}
+suppressPackageStartupMessages({
+  library(dplyr); library(readr); library(ggplot2); library(ggbeeswarm); library(ggtext)
+})
+
+spacing_map <- c(Control = 1, TTXinTTX = 2.2)
+mito_df <- read_csv("./Fig S1F, G.csv", show_col_types = FALSE) %>%
+  select(Date, Condition, Cell, mean_mito_len) %>%
+  mutate(Date = trimws(as.character(Date)), Condition = trimws(as.character(Condition)),
+         Condition = case_when(grepl("^Control", Condition, ignore.case = TRUE) ~ "Control",
+                               grepl("^TTXinTTX", Condition, ignore.case = TRUE) ~ "TTXinTTX",
+                               TRUE ~ Condition),
+         mean_mito_len = as.numeric(mean_mito_len)) %>%
+  filter(Condition %in% names(spacing_map), Date != "", !is.na(Cell),
+         is.finite(mean_mito_len)) %>%
+  mutate(Date = factor(Date), Condition = factor(Condition, levels = names(spacing_map)),
+         Date_Condition = paste(Condition, Date, sep = "_"),
+         x_pos = unname(spacing_map[as.character(Condition)]))
+
+if (n_distinct(mito_df$Condition) < 2 || n_distinct(mito_df$Date) < 2)
+  stop("Both conditions and at least two dates are required.")
+
+mito_df %>% select(Date, Condition, Cell, mean_mito_len) %>%
+  mutate(mean_mito_len = round(mean_mito_len, 3))
+```
+
+## Summary
+
+```{r fig-s1f-summary}
+summary_table <- mito_df %>% group_by(Condition) %>%
+  summarise(n_Cells = n_distinct(Date, Cell), n_Experiment_Dates = n_distinct(Date),
+            `Mean (SE)` = sprintf("%.3f (%.3f)", mean(mean_mito_len),
+                                  sd(mean_mito_len) / sqrt(n())), .groups = "drop")
+summary_table
+```
+
+## Statistics
+
+Two-way ANOVA with condition, experiment date, and their interaction (Type I sums of squares).
+
+```{r fig-s1f-statistics}
+fit_aov <- aov(mean_mito_len ~ Condition * Date, data = mito_df)
+condition_p <- as.numeric(anova(fit_aov)["Condition", "Pr(>F)"])
+format_p <- function(p) ifelse(p < 0.0001, "<0.0001", sprintf("%.4f", p))
+
+stats_table <- tibble(
+  Test = "Two-way ANOVA", Comparison = "Control vs TTXinTTX",
+  `Control mean (SE)` = summary_table$`Mean (SE)`[summary_table$Condition == "Control"],
+  `TTXinTTX mean (SE)` = summary_table$`Mean (SE)`[summary_table$Condition == "TTXinTTX"],
+  `Condition p` = format_p(condition_p)
+)
+stats_table
+
+anova(fit_aov)
+```
+
+## Plot
+
+```{r fig-s1f-plot, fig.width=18, fig.height=20}
+set.seed(20261109)
+date_levels <- levels(mito_df$Date)
+date_colors <- c(
+  setNames(rep(c("#4D4D4D", "#777B7E", "#1A1A1A"), length.out = length(date_levels)),
+           paste("Control", date_levels, sep = "_")),
+  setNames(rep(c("#00DC00", "#009A00", "#66FF66"), length.out = length(date_levels)),
+           paste("TTXinTTX", date_levels, sep = "_"))
+)
+test_results <- tibble(
+  group1_x = spacing_map["Control"], group2_x = spacing_map["TTXinTTX"],
+  y_position = 12.5,
+  stars = case_when(condition_p < 0.001 ~ "***", condition_p < 0.01 ~ "**",
+                    condition_p < 0.05 ~ "*", TRUE ~ "ns")
+) %>% filter(stars != "ns")
+
+figs1f_plot <- ggplot(mito_df, aes(x_pos, mean_mito_len, color = Date_Condition)) +
+  ggbeeswarm::geom_beeswarm(cex = 5, priority = "random", size = 20, corral = "random") +
+  geom_boxplot(aes(group = x_pos), fill = NA, width = 1, outlier.shape = NA,
+               linewidth = 2, color = "black") +
+  stat_summary(aes(group = x_pos), fun = mean, geom = "point",
+               shape = 15, size = 20, color = "black") +
+  geom_segment(data = test_results,
+               aes(x = group1_x, xend = group2_x, y = y_position, yend = y_position),
+               inherit.aes = FALSE, linewidth = 2, color = "black") +
+  geom_text(data = test_results,
+            aes(x = (group1_x + group2_x) / 2, y = y_position + 0.3, label = stars),
+            inherit.aes = FALSE, size = 25, color = "black") +
+  scale_x_continuous(breaks = unname(spacing_map),
+                     labels = c("control", "homeostatic\nplasticity\n(in TTX)")) +
+  scale_color_manual(values = date_colors) +
+  scale_y_continuous(oob = scales::oob_keep, breaks = c(4, 6, 8, 10, 12),
+                     limits = c(3, 13.5), expand = c(0, 0)) +
+  labs(x = NULL, y = "mito length (&micro;m)") +
+  theme_classic() +
+  theme(axis.title.y = ggtext::element_markdown(size = 80, color = "black"),
+        axis.text = element_text(size = 80, color = "black"),
+        axis.ticks = element_line(linewidth = 5, color = "black"),
+        axis.ticks.length = grid::unit(0.5, "cm"),
+        axis.line = element_line(linewidth = 2, color = "black"),
+        legend.position = "none")
+figs1f_plot
+```
+
+```{r fig-s1f-save, include=FALSE}
+dir.create("./Graphs", recursive = TRUE, showWarnings = FALSE)
+ggsave("./Graphs/Fig S1F.png", figs1f_plot, width = 18, height = 20,
+       units = "in", dpi = 300)
+tibble(Figure = "Fig S1F", File = "./Graphs/Fig S1F.png")
+```
+
+# Fig S1G
+
+Juxtaspinal mitochondrial area with imaging performed in the continued presence of TTX.
+
+**Source data**  
+`Fig S1F, G.csv`
+
+**Columns**
+
+- `Date` — Experiment date
+- `Condition` — Control or TTX with TTX maintained during imaging
+- `Cell` — Cell ID
+- `mean_mito` — Mean juxtaspinal mitochondrial area per cell (µm²)
+
+## Data
+
+```{r fig-s1g-data}
+suppressPackageStartupMessages({
+  library(dplyr); library(readr); library(ggplot2); library(ggbeeswarm); library(ggtext)
+})
+
+spacing_map <- c(Control = 1, TTXinTTX = 2.2)
+mito_df <- read_csv("./Fig S1F, G.csv", show_col_types = FALSE) %>%
+  select(Date, Condition, Cell, mean_mito) %>%
+  mutate(Date = trimws(as.character(Date)), Condition = trimws(as.character(Condition)),
+         Condition = case_when(grepl("^Control", Condition, ignore.case = TRUE) ~ "Control",
+                               grepl("^TTXinTTX", Condition, ignore.case = TRUE) ~ "TTXinTTX",
+                               TRUE ~ Condition),
+         mean_mito = as.numeric(mean_mito)) %>%
+  filter(Condition %in% names(spacing_map), Date != "", !is.na(Cell),
+         is.finite(mean_mito)) %>%
+  mutate(Date = factor(Date), Condition = factor(Condition, levels = names(spacing_map)),
+         Date_Condition = paste(Condition, Date, sep = "_"),
+         x_pos = unname(spacing_map[as.character(Condition)]))
+
+if (n_distinct(mito_df$Condition) < 2 || n_distinct(mito_df$Date) < 2)
+  stop("Both conditions and at least two dates are required.")
+
+mito_df %>% select(Date, Condition, Cell, mean_mito) %>%
+  mutate(mean_mito = round(mean_mito, 3))
+```
+
+## Summary
+
+```{r fig-s1g-summary}
+summary_table <- mito_df %>% group_by(Condition) %>%
+  summarise(n_Cells = n_distinct(Date, Cell), n_Experiment_Dates = n_distinct(Date),
+            `Mean (SE)` = sprintf("%.3f (%.3f)", mean(mean_mito),
+                                  sd(mean_mito) / sqrt(n())), .groups = "drop")
+summary_table
+```
+
+## Statistics
+
+Two-way ANOVA with condition, experiment date, and their interaction (Type I sums of squares).
+
+```{r fig-s1g-statistics}
+fit_aov <- aov(mean_mito ~ Condition * Date, data = mito_df)
+condition_p <- as.numeric(anova(fit_aov)["Condition", "Pr(>F)"])
+format_p <- function(p) ifelse(p < 0.0001, "<0.0001", sprintf("%.4f", p))
+
+stats_table <- tibble(
+  Test = "Two-way ANOVA", Comparison = "Control vs TTXinTTX",
+  `Control mean (SE)` = summary_table$`Mean (SE)`[summary_table$Condition == "Control"],
+  `TTXinTTX mean (SE)` = summary_table$`Mean (SE)`[summary_table$Condition == "TTXinTTX"],
+  `Condition p` = format_p(condition_p)
+)
+stats_table
+
+anova(fit_aov)
+```
+
+## Plot
+
+```{r fig-s1g-plot, fig.width=18, fig.height=20}
+set.seed(20261109)
+date_levels <- levels(mito_df$Date)
+date_colors <- c(
+  setNames(rep(c("#4D4D4D", "#777B7E", "#1A1A1A"), length.out = length(date_levels)),
+           paste("Control", date_levels, sep = "_")),
+  setNames(rep(c("#00DC00", "#66FF66", "#009A00"), length.out = length(date_levels)),
+           paste("TTXinTTX", date_levels, sep = "_"))
+)
+test_results <- tibble(
+  group1_x = spacing_map["Control"], group2_x = spacing_map["TTXinTTX"],
+  y_position = 1.4,
+  stars = case_when(condition_p < 0.001 ~ "***", condition_p < 0.01 ~ "**",
+                    condition_p < 0.05 ~ "*", TRUE ~ "ns")
+) %>% filter(stars != "ns")
+
+figs1g_plot <- ggplot(mito_df, aes(x_pos, mean_mito, color = Date_Condition)) +
+  ggbeeswarm::geom_beeswarm(cex = 5, priority = "random", size = 20, corral = "random") +
+  geom_boxplot(aes(group = x_pos), fill = NA, width = 1, outlier.shape = NA,
+               linewidth = 2, color = "black") +
+  stat_summary(aes(group = x_pos), fun = mean, geom = "point",
+               shape = 15, size = 20, color = "black") +
+  geom_segment(data = test_results,
+               aes(x = group1_x, xend = group2_x, y = y_position, yend = y_position),
+               inherit.aes = FALSE, linewidth = 2, color = "black") +
+  geom_text(data = test_results,
+            aes(x = (group1_x + group2_x) / 2, y = y_position + 0.02, label = stars),
+            inherit.aes = FALSE, size = 25, color = "black") +
+  scale_x_continuous(breaks = unname(spacing_map),
+                     labels = c("control", "homeostatic\nplasticity\n(in TTX)")) +
+  scale_color_manual(values = date_colors) +
+  scale_y_continuous(oob = scales::oob_keep, breaks = c(0.8, 1.0, 1.2, 1.4),
+                     limits = c(0.6, 1.5), expand = c(0, 0)) +
+  labs(x = NULL, y = "mito area (&micro;m<sup>2</sup>)") +
+  theme_classic() +
+  theme(axis.title.y = ggtext::element_markdown(size = 80, color = "black"),
+        axis.text = element_text(size = 80, color = "black"),
+        axis.ticks = element_line(linewidth = 5, color = "black"),
+        axis.ticks.length = grid::unit(0.5, "cm"),
+        axis.line = element_line(linewidth = 2, color = "black"),
+        legend.position = "none")
+figs1g_plot
+```
+
+```{r fig-s1g-save, include=FALSE}
+dir.create("./Graphs", recursive = TRUE, showWarnings = FALSE)
+ggsave("./Graphs/Fig S1G.png", figs1g_plot, width = 18, height = 20,
+       units = "in", dpi = 300)
+tibble(Figure = "Fig S1G", File = "./Graphs/Fig S1G.png")
+```
+
+# Fig S1H
+
+Dendritic mitochondrial length measured using endogenous PSD95 labeling with PSD95FingR-EGFP.
+
+**Source data**  
+`Fig S1H, I.csv`
+
+**Columns**
+
+- `Date` — Experiment date
+- `Condition` — Control or TTX
+- `Cell` — Cell ID
+- `mean_mito_len` — Mean mitochondrial length per cell (µm)
+
+## Data
+
+```{r fig-s1h-data}
+suppressPackageStartupMessages({
+  library(dplyr); library(readr); library(ggplot2); library(ggbeeswarm)
+})
+
+spacing_map <- c(Control = 1, TTX = 2.2)
+mito_df <- read_csv("./Fig S1H, I.csv", show_col_types = FALSE) %>%
+  select(Date, Condition, Cell, mean_mito_len) %>%
+  mutate(Date = trimws(as.character(Date)), Condition = trimws(as.character(Condition)),
+         Condition = case_when(grepl("^Control", Condition, ignore.case = TRUE) ~ "Control",
+                               grepl("^TTX", Condition, ignore.case = TRUE) ~ "TTX",
+                               TRUE ~ Condition),
+         mean_mito_len = as.numeric(mean_mito_len)) %>%
+  filter(Condition %in% names(spacing_map), Date != "", !is.na(Cell),
+         is.finite(mean_mito_len)) %>%
+  mutate(Date = factor(Date), Condition = factor(Condition, levels = names(spacing_map)),
+         Date_Condition = paste(Condition, Date, sep = "_"),
+         x_pos = unname(spacing_map[as.character(Condition)]))
+
+if (n_distinct(mito_df$Condition) < 2 || n_distinct(mito_df$Date) < 2)
+  stop("Both conditions and at least two dates are required.")
+
+mito_df %>% select(Date, Condition, Cell, mean_mito_len) %>%
+  mutate(mean_mito_len = round(mean_mito_len, 3))
+```
+
+## Summary
+
+```{r fig-s1h-summary}
+summary_table <- mito_df %>% group_by(Condition) %>%
+  summarise(n_Cells = n_distinct(Date, Cell), n_Experiment_Dates = n_distinct(Date),
+            `Mean (SE)` = sprintf("%.3f (%.3f)", mean(mean_mito_len),
+                                  sd(mean_mito_len) / sqrt(n())), .groups = "drop")
+summary_table
+```
+
+## Statistics
+
+Two-way ANOVA with condition, experiment date, and their interaction (Type I sums of squares).
+
+```{r fig-s1h-statistics}
+fit_aov <- aov(mean_mito_len ~ Condition * Date, data = mito_df)
+condition_p <- as.numeric(anova(fit_aov)["Condition", "Pr(>F)"])
+format_p <- function(p) ifelse(p < 0.0001, "<0.0001", sprintf("%.4f", p))
+
+stats_table <- tibble(
+  Test = "Two-way ANOVA", Comparison = "Control vs TTX",
+  `Control mean (SE)` = summary_table$`Mean (SE)`[summary_table$Condition == "Control"],
+  `TTX mean (SE)` = summary_table$`Mean (SE)`[summary_table$Condition == "TTX"],
+  `Condition p` = format_p(condition_p)
+)
+stats_table
+
+anova(fit_aov)
+```
+
+## Plot
+
+```{r fig-s1h-plot, fig.width=18, fig.height=20}
+set.seed(20261109)
+date_levels <- levels(mito_df$Date)
+date_colors <- c(
+  setNames(rep(c("#1A1A1A", "#4D4D4D", "#777B7E"), length.out = length(date_levels)),
+           paste("Control", date_levels, sep = "_")),
+  setNames(rep(c("#009A00", "#00DC00", "#66FF66"), length.out = length(date_levels)),
+           paste("TTX", date_levels, sep = "_"))
+)
+test_results <- tibble(
+  group1_x = spacing_map["Control"], group2_x = spacing_map["TTX"], y_position = 12.5,
+  stars = case_when(condition_p < 0.001 ~ "***", condition_p < 0.01 ~ "**",
+                    condition_p < 0.05 ~ "*", TRUE ~ "ns")
+) %>% filter(stars != "ns")
+
+figs1h_plot <- ggplot(mito_df, aes(x_pos, mean_mito_len, color = Date_Condition)) +
+  ggbeeswarm::geom_beeswarm(cex = 5, priority = "random", size = 20, corral = "random") +
+  geom_boxplot(aes(group = x_pos), fill = NA, width = 1, outlier.shape = NA,
+               linewidth = 2, color = "black") +
+  stat_summary(aes(group = x_pos), fun = mean, geom = "point",
+               shape = 15, size = 20, color = "black") +
+  geom_segment(data = test_results,
+               aes(x = group1_x, xend = group2_x, y = y_position, yend = y_position),
+               inherit.aes = FALSE, linewidth = 2, color = "black") +
+  geom_text(data = test_results,
+            aes(x = (group1_x + group2_x) / 2, y = y_position + 0.3, label = stars),
+            inherit.aes = FALSE, size = 25, color = "black") +
+  scale_x_continuous(breaks = unname(spacing_map),
+                     labels = c("control", "homeostatic\nplasticity")) +
+  scale_color_manual(values = date_colors) +
+  scale_y_continuous(oob = scales::oob_keep, breaks = c(4, 6, 8, 10, 12),
+                     limits = c(3, 13.5), expand = c(0, 0)) +
+  labs(x = NULL, y = "mito length (µm)") +
+  theme_classic() +
+  theme(axis.title = element_text(size = 80, color = "black"),
+        axis.text = element_text(size = 80, color = "black"),
+        axis.ticks = element_line(linewidth = 5, color = "black"),
+        axis.ticks.length = grid::unit(0.5, "cm"),
+        axis.line = element_line(linewidth = 2, color = "black"),
+        legend.position = "none")
+figs1h_plot
+```
+
+```{r fig-s1h-save, include=FALSE}
+dir.create("./Graphs", recursive = TRUE, showWarnings = FALSE)
+ggsave("./Graphs/Fig S1H.png", figs1h_plot, width = 18, height = 20,
+       units = "in", dpi = 300)
+tibble(Figure = "Fig S1H", File = "./Graphs/Fig S1H.png")
+```
+
+# Fig S1I
+
+Juxtaspinal mitochondrial area measured using endogenous PSD95 labeling with PSD95FingR-EGFP.
+
+**Source data**  
+`Fig S1H, I.csv`
+
+**Columns**
+
+- `Date` — Experiment date
+- `Condition` — Control or TTX
+- `Cell` — Cell ID
+- `mean_mito` — Mean juxtaspinal mitochondrial area per cell (µm²)
+
+## Data
+
+```{r fig-s1i-data}
+suppressPackageStartupMessages({
+  library(dplyr); library(readr); library(ggplot2); library(ggbeeswarm); library(ggtext)
+})
+
+spacing_map <- c(Control = 1, TTX = 2.2)
+mito_df <- read_csv("./Fig S1H, I.csv", show_col_types = FALSE) %>%
+  select(Date, Condition, Cell, mean_mito) %>%
+  mutate(Date = trimws(as.character(Date)), Condition = trimws(as.character(Condition)),
+         Condition = case_when(grepl("^Control", Condition, ignore.case = TRUE) ~ "Control",
+                               grepl("^TTX", Condition, ignore.case = TRUE) ~ "TTX",
+                               TRUE ~ Condition),
+         mean_mito = as.numeric(mean_mito)) %>%
+  filter(Condition %in% names(spacing_map), Date != "", !is.na(Cell),
+         is.finite(mean_mito)) %>%
+  mutate(Date = factor(Date), Condition = factor(Condition, levels = names(spacing_map)),
+         Date_Condition = paste(Condition, Date, sep = "_"),
+         x_pos = unname(spacing_map[as.character(Condition)]))
+
+if (n_distinct(mito_df$Condition) < 2 || n_distinct(mito_df$Date) < 2)
+  stop("Both conditions and at least two dates are required.")
+
+mito_df %>% select(Date, Condition, Cell, mean_mito) %>%
+  mutate(mean_mito = round(mean_mito, 3))
+```
+
+## Summary
+
+```{r fig-s1i-summary}
+summary_table <- mito_df %>% group_by(Condition) %>%
+  summarise(n_Cells = n_distinct(Date, Cell), n_Experiment_Dates = n_distinct(Date),
+            `Mean (SE)` = sprintf("%.3f (%.3f)", mean(mean_mito),
+                                  sd(mean_mito) / sqrt(n())), .groups = "drop")
+summary_table
+```
+
+## Statistics
+
+Two-way ANOVA with condition, experiment date, and their interaction (Type I sums of squares).
+
+```{r fig-s1i-statistics}
+fit_aov <- aov(mean_mito ~ Condition * Date, data = mito_df)
+condition_p <- as.numeric(anova(fit_aov)["Condition", "Pr(>F)"])
+format_p <- function(p) ifelse(p < 0.0001, "<0.0001", sprintf("%.4f", p))
+
+stats_table <- tibble(
+  Test = "Two-way ANOVA", Comparison = "Control vs TTX",
+  `Control mean (SE)` = summary_table$`Mean (SE)`[summary_table$Condition == "Control"],
+  `TTX mean (SE)` = summary_table$`Mean (SE)`[summary_table$Condition == "TTX"],
+  `Condition p` = format_p(condition_p)
+)
+stats_table
+
+anova(fit_aov)
+```
+
+## Plot
+
+```{r fig-s1i-plot, fig.width=18, fig.height=20}
+set.seed(20261109)
+date_levels <- levels(mito_df$Date)
+date_colors <- c(
+  setNames(rep(c("#1A1A1A", "#4D4D4D", "#777B7E"), length.out = length(date_levels)),
+           paste("Control", date_levels, sep = "_")),
+  setNames(rep(c("#009A00", "#00DC00", "#66FF66"), length.out = length(date_levels)),
+           paste("TTX", date_levels, sep = "_"))
+)
+test_results <- tibble(
+  group1_x = spacing_map["Control"], group2_x = spacing_map["TTX"], y_position = 1.4,
+  stars = case_when(condition_p < 0.001 ~ "***", condition_p < 0.01 ~ "**",
+                    condition_p < 0.05 ~ "*", TRUE ~ "ns")
+) %>% filter(stars != "ns")
+
+figs1i_plot <- ggplot(mito_df, aes(x_pos, mean_mito, color = Date_Condition)) +
+  ggbeeswarm::geom_beeswarm(cex = 5, priority = "random", size = 20, corral = "random") +
+  geom_boxplot(aes(group = x_pos), fill = NA, width = 1, outlier.shape = NA,
+               linewidth = 2, color = "black") +
+  stat_summary(aes(group = x_pos), fun = mean, geom = "point",
+               shape = 15, size = 20, color = "black") +
+  geom_segment(data = test_results,
+               aes(x = group1_x, xend = group2_x, y = y_position, yend = y_position),
+               inherit.aes = FALSE, linewidth = 2, color = "black") +
+  geom_text(data = test_results,
+            aes(x = (group1_x + group2_x) / 2, y = y_position + 0.02, label = stars),
+            inherit.aes = FALSE, size = 25, color = "black") +
+  scale_x_continuous(breaks = unname(spacing_map),
+                     labels = c("control", "homeostatic\nplasticity")) +
+  scale_color_manual(values = date_colors) +
+  scale_y_continuous(oob = scales::oob_keep, breaks = c(0.8, 1.0, 1.2, 1.4),
+                     limits = c(0.65, 1.5), expand = c(0, 0)) +
+  labs(x = NULL, y = "mito area (&micro;m<sup>2</sup>)") +
+  theme_classic() +
+  theme(axis.title.y = ggtext::element_markdown(size = 80, color = "black"),
+        axis.text = element_text(size = 80, color = "black"),
+        axis.ticks = element_line(linewidth = 5, color = "black"),
+        axis.ticks.length = grid::unit(0.5, "cm"),
+        axis.line = element_line(linewidth = 2, color = "black"),
+        legend.position = "none")
+figs1i_plot
+```
+
+```{r fig-s1i-save, include=FALSE}
+dir.create("./Graphs", recursive = TRUE, showWarnings = FALSE)
+ggsave("./Graphs/Fig S1I.png", figs1i_plot, width = 18, height = 20,
+       units = "in", dpi = 300)
+tibble(Figure = "Fig S1I", File = "./Graphs/Fig S1I.png")
+```
+
+# Fig S1M
+
+Static morphological signatures of juxtaspinal mitochondrial enlargement in somatosensory cortex.
+
+**Source data**  
+`Fig S1M.csv`
+
+**Columns**
+
+- `Morphology` — Recruitment, protrusion, budding, or no change
+- `synapses` — Synapse count in the category
+- `total_synapses` — Total synapse count
+
+## Data
+
+```{r fig-s1m-data}
+suppressPackageStartupMessages({
+  library(dplyr); library(readr); library(ggplot2)
+})
+
+category_order <- c("recruitment", "protrusion", "budding", "no change")
+Pie <- read_csv("./Fig S1M.csv", show_col_types = FALSE) %>%
+  transmute(Category = trimws(tolower(Morphology)),
+            Value = as.numeric(synapses),
+            total_synapses = as.numeric(total_synapses))
+
+if (nrow(Pie) != 4 || anyDuplicated(Pie$Category) ||
+    !setequal(Pie$Category, category_order))
+  stop("Fig S1M.csv must contain each of the four morphology categories once.")
+if (any(!is.finite(Pie$Value)) || n_distinct(Pie$total_synapses) != 1 ||
+    sum(Pie$Value) != Pie$total_synapses[1])
+  stop("Synapse counts must sum to the shared total_synapses value.")
+
+Pie <- Pie %>%
+  mutate(Category = factor(Category, levels = category_order)) %>%
+  arrange(Category) %>%
+  mutate(Percent = round(100 * Value / total_synapses),
+         midpoint = cumsum(Value) - Value / 2)
+
+Pie %>% select(Category, Value, total_synapses, Percent)
+```
+
+## Summary
+
+```{r fig-s1m-summary}
+summary_table <- Pie %>% select(Category, Percent)
+summary_table
+```
+
+## Statistics
+
+Descriptive counts and percentages.
+
+## Plot
+
+```{r fig-s1m-plot, fig.width=20, fig.height=20}
+set.seed(20261109)
+fill_colors <- c(recruitment = "#66FF66", protrusion = "#00DC00",
+                 budding = "#009A00", `no change` = "#BDBDBD")
+start_angle <- -2 * pi * Pie$Value[Pie$Category == "recruitment"] / sum(Pie$Value)
+
+pie_labels <- Pie %>% mutate(
+  percent_x = case_when(Category == "recruitment" ~ 1.25,
+                        Category == "protrusion" ~ 1.35,
+                        Category == "budding" ~ 1.63, TRUE ~ 1),
+  category_y = case_when(
+    Category == "recruitment" ~ midpoint - 0.025 * sum(Value),
+    Category == "protrusion" ~ midpoint - 0.015 * sum(Value),
+    Category == "budding" ~ midpoint + 0.05 * sum(Value),
+    TRUE ~ midpoint
+  )
+)
+
+figs1m_plot <- ggplot(Pie, aes(x = 1, y = Value, fill = Category)) +
+  geom_col(width = 1, linewidth = 0, position = position_stack(reverse = TRUE),
+           show.legend = FALSE) +
+  geom_text(data = pie_labels,
+            aes(x = percent_x, y = midpoint, label = paste0(Percent, "%")),
+            inherit.aes = FALSE, size = 18, color = "black") +
+  geom_text(data = pie_labels,
+            aes(x = 1.95, y = category_y, label = as.character(Category)),
+            inherit.aes = FALSE, size = 13, color = "black") +
+  scale_fill_manual(values = fill_colors, guide = "none") +
+  scale_x_continuous(oob = scales::oob_keep, limits = c(0.5, 2.15), expand = c(0, 0)) +
+  coord_polar(theta = "y", start = start_angle, direction = 1, clip = "off") +
+  theme_void() +
+  theme(plot.background = element_rect(fill = "white", color = NA),
+        plot.margin = margin(40, 80, 40, 80))
+figs1m_plot
+```
+
+```{r fig-s1m-save, include=FALSE}
+dir.create("./Graphs", recursive = TRUE, showWarnings = FALSE)
+ggsave("./Graphs/Fig S1M.png", figs1m_plot, width = 20, height = 20,
+       units = "in", dpi = 300)
+tibble(Figure = "Fig S1M", File = "./Graphs/Fig S1M.png")
+```

@@ -1,0 +1,907 @@
+---
+title: "Figure S12: PKA inhibition controls"
+knit: (function(inputFile, encoding) { inputFile <- normalizePath(inputFile); oldwd <- setwd(dirname(inputFile)); on.exit(setwd(oldwd)); rmarkdown::render(basename(inputFile), encoding = encoding, output_file = "Fig S12.html", knit_root_dir = getwd()) })
+output:
+  html_document:
+    theme: darkly
+    highlight: breezedark
+    df_print: paged
+    toc: true
+    toc_depth: 1
+    toc_float: true
+    code_folding: hide
+    self_contained: true
+    mathjax: null
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE, message = FALSE, warning = FALSE,
+  fig.width = 30, fig.height = 20, fig.retina = 1,
+  out.width = "100%", fig.align = "center"
+)
+
+set.seed(20261109)
+options(width = 120, dplyr.summarise.inform = FALSE)
+options(contrasts = c("contr.treatment", "contr.poly"))
+
+```
+
+# Fig S12B
+
+GluA1 S845 phosphorylation relative to total GluA1 with compartment-specific PKA inhibition.
+
+**Source data**  
+`Fig S12B.csv`
+
+**Columns**
+
+- `Date` — Experiment date
+- `Condition` — Control, Matrix-PKI, or IMS-PKI construct
+- `Treatment` — Control or TTX
+- `phosphoGluA1_ratio` — GluA1 S845 phosphorylation / total GluA1
+
+## Data
+
+```{r fig-s12b-data}
+suppressPackageStartupMessages({
+  library(readr); library(dplyr); library(ggplot2)
+  library(ggbeeswarm); library(ggtext); library(emmeans)
+})
+
+condition_order <- c("Control", "Matrix-PKI", "IMS-PKI")
+condition_stat_order <- c("Control", "MatrixPKI", "IMSPKI")
+treatment_order <- c("Control", "TTX")
+group_order <- c("Control Control", "Control TTX", "Matrix-PKI Control",
+                 "Matrix-PKI TTX", "IMS-PKI Control", "IMS-PKI TTX")
+group_stat_order <- c("Control Control", "Control TTX", "MatrixPKI Control",
+                      "MatrixPKI TTX", "IMSPKI Control", "IMSPKI TTX")
+spacing_map <- c("Control Control" = 1, "Control TTX" = 2.2,
+                 "Matrix-PKI Control" = 4, "Matrix-PKI TTX" = 5.2,
+                 "IMS-PKI Control" = 7, "IMS-PKI TTX" = 8.2)
+spacing_map_stat <- c("Control Control" = 1, "Control TTX" = 2.2,
+                      "MatrixPKI Control" = 4, "MatrixPKI TTX" = 5.2,
+                      "IMSPKI Control" = 7, "IMSPKI TTX" = 8.2)
+
+Intensity_df <- read_csv("./Fig S12B.csv", show_col_types = FALSE) %>%
+  select(Date, Condition, Treatment, phosphoGluA1_ratio) %>%
+  rename(ratio = phosphoGluA1_ratio) %>%
+  mutate(Date = as.character(Date),
+         Condition = trimws(as.character(Condition)),
+         Treatment = trimws(as.character(Treatment)),
+         ratio = as.numeric(ratio),
+         Condition = case_when(
+           Condition == "Control" ~ "Control",
+           Condition %in% c("Mt-PKI", "Matrix PKI", "Matrix-PKI") ~ "Matrix-PKI",
+           Condition %in% c("IMS-PKI", "IMS PKI") ~ "IMS-PKI",
+           TRUE ~ Condition),
+         Treatment = case_when(
+           Treatment %in% c("Control", "-TTX", "(-TTX)") ~ "Control",
+           Treatment %in% c("TTX", "+TTX", "(+TTX)") ~ "TTX",
+           TRUE ~ Treatment),
+         Condition_stat = case_when(
+           Condition == "Control" ~ "Control",
+           Condition == "Matrix-PKI" ~ "MatrixPKI",
+           Condition == "IMS-PKI" ~ "IMSPKI",
+           TRUE ~ Condition),
+         Treatment_stat = Treatment,
+         Date = factor(Date, levels = sort(unique(Date))),
+         Condition = factor(Condition, levels = condition_order),
+         Treatment = factor(Treatment, levels = treatment_order),
+         Condition_stat = factor(Condition_stat, levels = condition_stat_order),
+         Treatment_stat = factor(Treatment_stat, levels = treatment_order),
+         Group = factor(paste(Condition, Treatment), levels = group_order),
+         Group_stat = factor(paste(Condition_stat, Treatment_stat),
+                             levels = group_stat_order),
+         x_pos = unname(spacing_map[as.character(Group)])) %>%
+  filter(!is.na(Date), !is.na(Condition), !is.na(Treatment),
+         !is.na(Group), is.finite(ratio))
+
+design_check <- Intensity_df %>% group_by(Date) %>%
+  summarise(n_rows = n(), n_groups = n_distinct(Group), .groups = "drop")
+
+if (any(design_check$n_rows != 6 | design_check$n_groups != 6))
+  stop("Each Date must contain exactly one value for all six Condition x Treatment combinations.")
+
+Intensity_df %>%
+  transmute(Date, Condition, Treatment,
+            phosphoGluA1_ratio = round(ratio, 3))
+```
+
+## Summary
+
+```{r fig-s12b-summary}
+summary_table <- Intensity_df %>% group_by(Group) %>%
+  summarise(mean_ratio = mean(ratio), sd = sd(ratio),
+            sem = sd / sqrt(n()), n = n(), .groups = "drop")
+summary_table
+```
+
+## Statistics
+
+Matched two-way ANOVA for construct and treatment, matched by experiment date. Treatment contrasts within construct use Tukey adjustment.
+
+```{r fig-s12b-statistics}
+p_stars <- function(p) case_when(
+  is.na(p) ~ NA_character_, p < 0.001 ~ "***",
+  p < 0.01 ~ "**", p < 0.05 ~ "*", TRUE ~ "ns"
+)
+
+options(contrasts = c("contr.sum", "contr.poly"))
+
+fit_aov <- aov(
+  ratio ~ Condition_stat * Treatment_stat +
+    Error(Date / (Condition_stat * Treatment_stat)),
+  data = Intensity_df
+)
+
+anova_table <- bind_rows(lapply(summary(fit_aov), function(x)
+  tibble::rownames_to_column(as.data.frame(x[[1]]), "Effect"))) %>%
+  mutate(Effect = trimws(Effect)) %>%
+  filter(Effect %in% c("Condition_stat", "Treatment_stat",
+                       "Condition_stat:Treatment_stat")) %>%
+  transmute(
+    Effect = case_when(
+      Effect == "Condition_stat" ~ "Condition",
+      Effect == "Treatment_stat" ~ "Treatment",
+      Effect == "Condition_stat:Treatment_stat" ~ "Condition x Treatment",
+      TRUE ~ Effect
+    ),
+    df = Df, F = `F value`, p = `Pr(>F)`,
+    significance = p_stars(p)
+  )
+
+anova_table
+
+emm_treatment <- emmeans(fit_aov, ~ Treatment_stat | Condition_stat) %>%
+  contrast(method = "pairwise", adjust = "tukey") %>%
+  as.data.frame() %>%
+  mutate(
+    contrast = as.character(contrast),
+    comparison_type = "Treatment within Condition",
+    level1 = sapply(strsplit(contrast, " - ", fixed = TRUE), `[`, 1),
+    level2 = sapply(strsplit(contrast, " - ", fixed = TRUE), `[`, 2),
+    group1 = paste(Condition_stat, level1),
+    group2 = paste(Condition_stat, level2)
+  )
+
+emm_condition <- emmeans(fit_aov, ~ Condition_stat | Treatment_stat) %>%
+  contrast(method = "pairwise", adjust = "tukey") %>%
+  as.data.frame() %>%
+  mutate(
+    contrast = as.character(contrast),
+    comparison_type = "Condition within Treatment",
+    level1 = sapply(strsplit(contrast, " - ", fixed = TRUE), `[`, 1),
+    level2 = sapply(strsplit(contrast, " - ", fixed = TRUE), `[`, 2),
+    group1 = paste(level1, Treatment_stat),
+    group2 = paste(level2, Treatment_stat)
+  )
+
+posthoc_table <- bind_rows(
+  emm_treatment %>%
+    select(comparison_type, group1, group2, estimate, SE, df, t.ratio, p.value),
+  emm_condition %>%
+    select(comparison_type, group1, group2, estimate, SE, df, t.ratio, p.value)
+) %>%
+  rename(p.adj = p.value) %>%
+  mutate(p.signif = p_stars(p.adj))
+
+posthoc_table
+```
+
+## Plot
+
+```{r fig-s12b-plot, fig.width=30, fig.height=20}
+set.seed(20261109)
+label_red <- "#D00000"
+group_colors <- c("Control Control" = "#777B7E", "Control TTX" = "#1A1A1A",
+                  "Matrix-PKI Control" = "#777B7E", "Matrix-PKI TTX" = "#1A1A1A",
+                  "IMS-PKI Control" = "#777B7E", "IMS-PKI TTX" = "#1A1A1A")
+
+get_posthoc <- function(g1, g2) {
+  out <- posthoc_table %>%
+    filter((group1 == g1 & group2 == g2) | (group1 == g2 & group2 == g1))
+  if (!nrow(out))
+    return(tibble(group1 = g1, group2 = g2, p.adj = NA_real_,
+                  p.signif = NA_character_))
+  out %>% slice(1) %>% mutate(group1 = g1, group2 = g2)
+}
+
+stats_plot <- bind_rows(
+  get_posthoc("Control Control", "Control TTX"),
+  get_posthoc("MatrixPKI Control", "MatrixPKI TTX"),
+  get_posthoc("IMSPKI Control", "IMSPKI TTX")
+) %>%
+  filter(!is.na(p.adj), p.adj < 0.05) %>%
+  mutate(x1 = unname(spacing_map_stat[group1]),
+         x2 = unname(spacing_map_stat[group2]),
+         y_position = 0.115, x_mid = (x1 + x2) / 2)
+
+group_labels <- tibble(x = c(1.6, 4.6, 7.6), y = -0.014,
+                       label = c("control", "matrix-PKI", "IMS-PKI"))
+
+tick_labels <- c(
+  "<span>−</span>", "<span>+</span>",
+  paste0("<span style='color:", label_red, "'>−</span>"),
+  paste0("<span style='color:", label_red, "'>+</span>"),
+  "<span>−</span>", "<span>+</span>"
+)
+
+figs12b_plot <- ggplot(Intensity_df, aes(x_pos, ratio, color = Group)) +
+  geom_boxplot(aes(group = x_pos), fill = NA, width = 1,
+               outlier.shape = NA, linewidth = 2, color = "black") +
+  ggbeeswarm::geom_beeswarm(cex = 9, priority = "random", size = 15,
+                            alpha = 1, corral = "random") +
+  stat_summary(aes(group = x_pos), fun = mean, geom = "point",
+               shape = 15, size = 20, color = "black") +
+  geom_segment(data = stats_plot,
+               aes(x = x1, xend = x2, y = y_position, yend = y_position),
+               inherit.aes = FALSE, linewidth = 2, color = "black") +
+  geom_text(data = stats_plot,
+            aes(x = x_mid, y = y_position + 0.003, label = p.signif),
+            inherit.aes = FALSE, size = 25, color = "black") +
+  geom_text(data = filter(group_labels, label != "matrix-PKI"),
+            aes(x, y, label = label), inherit.aes = FALSE,
+            size = 30, color = "black") +
+  geom_text(data = filter(group_labels, label == "matrix-PKI"),
+            aes(x, y, label = label), inherit.aes = FALSE,
+            size = 30, color = label_red) +
+  scale_x_continuous(breaks = unname(spacing_map), labels = tick_labels) +
+  scale_color_manual(values = group_colors, breaks = group_order) +
+  scale_y_continuous(breaks = c(0, 0.05, 0.1), expand = c(0, 0)) +
+  coord_cartesian(ylim = c(0, 0.125), clip = "off") +
+  labs(x = NULL, y = "phospho GluA1 (S845)/\ntotal GluA1") +
+  theme_classic() +
+  theme(axis.title = element_text(size = 80, color = "black"),
+        axis.text = element_text(size = 80, color = "black"),
+        axis.text.x = ggtext::element_markdown(size = 80, color = "black"),
+        axis.ticks = element_line(linewidth = 5, color = "black"),
+        axis.ticks.length = grid::unit(0.5, "cm"),
+        axis.line = element_line(linewidth = 2, color = "black"),
+        plot.margin = margin(20, 20, 220, 20),
+        legend.position = "none")
+
+figs12b_plot
+```
+
+```{r fig-s12b-save, include=FALSE}
+dir.create("./Graphs", recursive = TRUE, showWarnings = FALSE)
+
+ggsave(
+  "./Graphs/Fig S12B.png", figs12b_plot,
+  width = 30, height = 20, units = "in", dpi = 300
+)
+
+tibble(Figure = "Fig S12B", File = "./Graphs/Fig S12B.png")
+```
+
+# Fig S12D
+
+GluN1 S897 phosphorylation relative to total GluN1 with compartment-specific PKA inhibition.
+
+**Source data**  
+`Fig S12D.csv`
+
+**Columns**
+
+- `Date` — Experiment date
+- `Condition` — Control, Matrix-PKI, or IMS-PKI construct
+- `Treatment` — Control or TTX
+- `phosphoGluN1_ratio` — GluN1 S897 phosphorylation / total GluN1
+
+## Data
+
+```{r fig-s12d-data}
+suppressPackageStartupMessages({
+  library(readr); library(dplyr); library(ggplot2)
+  library(ggbeeswarm); library(ggtext); library(emmeans)
+})
+
+condition_order <- c("Control", "Matrix-PKI", "IMS-PKI")
+condition_stat_order <- c("Control", "MatrixPKI", "IMSPKI")
+treatment_order <- c("Control", "TTX")
+group_order <- c("Control Control", "Control TTX", "Matrix-PKI Control",
+                 "Matrix-PKI TTX", "IMS-PKI Control", "IMS-PKI TTX")
+group_stat_order <- c("Control Control", "Control TTX", "MatrixPKI Control",
+                      "MatrixPKI TTX", "IMSPKI Control", "IMSPKI TTX")
+spacing_map <- c("Control Control" = 1, "Control TTX" = 2.2,
+                 "Matrix-PKI Control" = 4, "Matrix-PKI TTX" = 5.2,
+                 "IMS-PKI Control" = 7, "IMS-PKI TTX" = 8.2)
+spacing_map_stat <- c("Control Control" = 1, "Control TTX" = 2.2,
+                      "MatrixPKI Control" = 4, "MatrixPKI TTX" = 5.2,
+                      "IMSPKI Control" = 7, "IMSPKI TTX" = 8.2)
+
+Intensity_df <- read_csv("./Fig S12D.csv", show_col_types = FALSE) %>%
+  select(Date, Condition, Treatment, phosphoGluN1_ratio) %>%
+  rename(ratio = phosphoGluN1_ratio) %>%
+  mutate(Date = as.character(Date),
+         Condition = trimws(as.character(Condition)),
+         Treatment = trimws(as.character(Treatment)),
+         ratio = as.numeric(ratio),
+         Condition = case_when(
+           Condition == "Control" ~ "Control",
+           Condition %in% c("Mt-PKI", "Matrix PKI", "Matrix-PKI") ~ "Matrix-PKI",
+           Condition %in% c("IMS-PKI", "IMS PKI") ~ "IMS-PKI",
+           TRUE ~ Condition),
+         Treatment = case_when(
+           Treatment %in% c("Control", "-TTX", "(-TTX)") ~ "Control",
+           Treatment %in% c("TTX", "+TTX", "(+TTX)") ~ "TTX",
+           TRUE ~ Treatment),
+         Condition_stat = case_when(
+           Condition == "Control" ~ "Control",
+           Condition == "Matrix-PKI" ~ "MatrixPKI",
+           Condition == "IMS-PKI" ~ "IMSPKI",
+           TRUE ~ Condition),
+         Treatment_stat = Treatment,
+         Date = factor(Date, levels = sort(unique(Date))),
+         Condition = factor(Condition, levels = condition_order),
+         Treatment = factor(Treatment, levels = treatment_order),
+         Condition_stat = factor(Condition_stat, levels = condition_stat_order),
+         Treatment_stat = factor(Treatment_stat, levels = treatment_order),
+         Group = factor(paste(Condition, Treatment), levels = group_order),
+         Group_stat = factor(paste(Condition_stat, Treatment_stat),
+                             levels = group_stat_order),
+         x_pos = unname(spacing_map[as.character(Group)])) %>%
+  filter(!is.na(Date), !is.na(Condition), !is.na(Treatment),
+         !is.na(Group), is.finite(ratio))
+
+design_check <- Intensity_df %>% group_by(Date) %>%
+  summarise(n_rows = n(), n_groups = n_distinct(Group), .groups = "drop")
+
+if (any(design_check$n_rows != 6 | design_check$n_groups != 6))
+  stop("Each Date must contain exactly one value for all six Condition x Treatment combinations.")
+
+Intensity_df %>%
+  transmute(Date, Condition, Treatment, phosphoGluN1_ratio = round(ratio, 3))
+```
+
+## Summary
+
+```{r fig-s12d-summary}
+summary_table <- Intensity_df %>% group_by(Group) %>%
+  summarise(mean_ratio = mean(ratio), sd = sd(ratio),
+            sem = sd / sqrt(n()), n = n(), .groups = "drop")
+summary_table
+```
+
+## Statistics
+
+Matched two-way ANOVA for construct and treatment, matched by experiment date. Treatment contrasts within construct use Tukey adjustment.
+
+```{r fig-s12d-statistics}
+p_stars <- function(p) case_when(
+  is.na(p) ~ NA_character_, p < 0.001 ~ "***",
+  p < 0.01 ~ "**", p < 0.05 ~ "*", TRUE ~ "ns"
+)
+
+options(contrasts = c("contr.sum", "contr.poly"))
+
+fit_aov <- aov(
+  ratio ~ Condition_stat * Treatment_stat +
+    Error(Date / (Condition_stat * Treatment_stat)),
+  data = Intensity_df
+)
+
+anova_table <- bind_rows(lapply(summary(fit_aov), function(x)
+  tibble::rownames_to_column(as.data.frame(x[[1]]), "Effect"))) %>%
+  mutate(Effect = trimws(Effect)) %>%
+  filter(Effect %in% c("Condition_stat", "Treatment_stat",
+                       "Condition_stat:Treatment_stat")) %>%
+  transmute(
+    Effect = case_when(
+      Effect == "Condition_stat" ~ "Condition",
+      Effect == "Treatment_stat" ~ "Treatment",
+      Effect == "Condition_stat:Treatment_stat" ~ "Condition x Treatment",
+      TRUE ~ Effect
+    ),
+    df = Df, F = `F value`, p = `Pr(>F)`,
+    significance = p_stars(p)
+  )
+
+anova_table
+
+emm_treatment <- emmeans(fit_aov, ~ Treatment_stat | Condition_stat) %>%
+  contrast(method = "pairwise", adjust = "tukey") %>%
+  as.data.frame() %>%
+  mutate(
+    contrast = as.character(contrast),
+    comparison_type = "Treatment within Condition",
+    level1 = sapply(strsplit(contrast, " - ", fixed = TRUE), `[`, 1),
+    level2 = sapply(strsplit(contrast, " - ", fixed = TRUE), `[`, 2),
+    group1 = paste(Condition_stat, level1),
+    group2 = paste(Condition_stat, level2)
+  )
+
+emm_condition <- emmeans(fit_aov, ~ Condition_stat | Treatment_stat) %>%
+  contrast(method = "pairwise", adjust = "tukey") %>%
+  as.data.frame() %>%
+  mutate(
+    contrast = as.character(contrast),
+    comparison_type = "Condition within Treatment",
+    level1 = sapply(strsplit(contrast, " - ", fixed = TRUE), `[`, 1),
+    level2 = sapply(strsplit(contrast, " - ", fixed = TRUE), `[`, 2),
+    group1 = paste(level1, Treatment_stat),
+    group2 = paste(level2, Treatment_stat)
+  )
+
+posthoc_table <- bind_rows(
+  emm_treatment %>%
+    select(comparison_type, group1, group2, estimate, SE, df, t.ratio, p.value),
+  emm_condition %>%
+    select(comparison_type, group1, group2, estimate, SE, df, t.ratio, p.value)
+) %>%
+  rename(p.adj = p.value) %>%
+  mutate(p.signif = p_stars(p.adj))
+
+posthoc_table
+```
+
+## Plot
+
+```{r fig-s12d-plot, fig.width=30, fig.height=20}
+set.seed(20261109)
+label_red <- "#D00000"
+group_colors <- c("Control Control" = "#777B7E", "Control TTX" = "#1A1A1A",
+                  "Matrix-PKI Control" = "#777B7E", "Matrix-PKI TTX" = "#1A1A1A",
+                  "IMS-PKI Control" = "#777B7E", "IMS-PKI TTX" = "#1A1A1A")
+
+get_posthoc <- function(g1, g2) {
+  out <- posthoc_table %>%
+    filter((group1 == g1 & group2 == g2) | (group1 == g2 & group2 == g1))
+  if (!nrow(out))
+    return(tibble(group1 = g1, group2 = g2, p.adj = NA_real_,
+                  p.signif = NA_character_))
+  out %>% slice(1) %>% mutate(group1 = g1, group2 = g2)
+}
+
+stats_plot <- bind_rows(
+  get_posthoc("Control Control", "Control TTX"),
+  get_posthoc("MatrixPKI Control", "MatrixPKI TTX"),
+  get_posthoc("IMSPKI Control", "IMSPKI TTX")
+) %>%
+  filter(!is.na(p.adj), p.adj < 0.05) %>%
+  mutate(x1 = unname(spacing_map_stat[group1]),
+         x2 = unname(spacing_map_stat[group2]),
+         y_position = 0.115, x_mid = (x1 + x2) / 2)
+
+group_labels <- tibble(x = c(1.6, 4.6, 7.6), y = -0.014,
+                       label = c("control", "matrix-PKI", "IMS-PKI"))
+
+tick_labels <- c(
+  "<span>−</span>", "<span>+</span>",
+  paste0("<span style='color:", label_red, "'>−</span>"),
+  paste0("<span style='color:", label_red, "'>+</span>"),
+  "<span>−</span>", "<span>+</span>"
+)
+
+figs12d_plot <- ggplot(Intensity_df, aes(x_pos, ratio, color = Group)) +
+  geom_boxplot(aes(group = x_pos), fill = NA, width = 1,
+               outlier.shape = NA, linewidth = 2, color = "black") +
+  ggbeeswarm::geom_beeswarm(cex = 9, priority = "random", size = 15, corral = "random") +
+  stat_summary(aes(group = x_pos), fun = mean, geom = "point",
+               shape = 15, size = 20, color = "black") +
+  geom_segment(data = stats_plot,
+               aes(x = x1, xend = x2, y = y_position, yend = y_position),
+               inherit.aes = FALSE, linewidth = 2, color = "black") +
+  geom_text(data = stats_plot,
+            aes(x = x_mid, y = y_position + 0.003, label = p.signif),
+            inherit.aes = FALSE, size = 25, color = "black") +
+  geom_text(data = filter(group_labels, label != "matrix-PKI"),
+            aes(x, y, label = label), inherit.aes = FALSE,
+            size = 30, color = "black") +
+  geom_text(data = filter(group_labels, label == "matrix-PKI"),
+            aes(x, y, label = label), inherit.aes = FALSE,
+            size = 30, color = label_red) +
+  scale_x_continuous(breaks = unname(spacing_map), labels = tick_labels) +
+  scale_color_manual(values = group_colors, breaks = group_order) +
+  scale_y_continuous(breaks = c(0, 0.05, 0.1), expand = c(0, 0)) +
+  coord_cartesian(ylim = c(0, 0.125), clip = "off") +
+  labs(x = NULL, y = "phospho GluN1 (S897)/\ntotal GluN1") +
+  theme_classic() +
+  theme(axis.title = element_text(size = 80, color = "black"),
+        axis.text = element_text(size = 80, color = "black"),
+        axis.text.x = ggtext::element_markdown(size = 80, color = "black"),
+        axis.ticks = element_line(linewidth = 5, color = "black"),
+        axis.ticks.length = grid::unit(0.5, "cm"),
+        axis.line = element_line(linewidth = 2, color = "black"),
+        plot.margin = margin(20, 20, 220, 20),
+        legend.position = "none")
+
+figs12d_plot
+```
+
+```{r fig-s12d-save, include=FALSE}
+dir.create("./Graphs", recursive = TRUE, showWarnings = FALSE)
+
+ggsave(
+  "./Graphs/Fig S12D.png", figs12d_plot,
+  width = 30, height = 20, units = "in", dpi = 300
+)
+
+tibble(Figure = "Fig S12D", File = "./Graphs/Fig S12D.png")
+```
+
+# Fig S12E
+
+Mitochondrial pH after homeostatic plasticity in Matrix-PKI-expressing neurons.
+
+**Source data**  
+`Fig S12E.csv`
+
+**Columns**
+
+- `Date` — Experiment date
+- `Condition` — Control or TTX
+- `Dish` — Culture dish ID
+- `Cell` — Cell ID
+- `Mito_ID` — Mitochondrial trace ID
+- `Frame` — Imaging frame
+- `Intensity` — pH sensor fluorescence
+
+## Data
+
+pH is estimated per trace using mean fluorescence over the first ten frames, peak fluorescence, pKa 7.1, and a reference pH of 7.4.
+
+```{r figs12e-data}
+suppressPackageStartupMessages({
+  library(dplyr); library(readr); library(ggplot2); library(ggbeeswarm); library(ggtext)
+})
+
+pKa <- 7.1
+spacing_map <- c("Control MitoPKI" = 1, "TTX MitoPKI" = 2.2)
+condition_labels <- c("Control MitoPKI" = "Control", "TTX MitoPKI" = "TTX")
+
+Mito_pH_df <- read_csv("./Fig S12E.csv", show_col_types = FALSE) %>%
+  transmute(Date = trimws(as.character(Date)), Condition = trimws(as.character(Condition)),
+            Dish = as.numeric(Dish), Cell = as.numeric(Cell), Mito_ID = as.character(Mito_ID),
+            Frame = as.numeric(Frame), Intensity = as.numeric(Intensity)) %>%
+  filter(Condition %in% names(spacing_map), Date != "", is.finite(Frame), is.finite(Intensity)) %>%
+  group_by(Date, Condition, Dish, Cell, Mito_ID, Frame) %>%
+  summarise(Intensity = mean(Intensity, na.rm = TRUE), .groups = "drop") %>%
+  arrange(Date, Condition, Dish, Cell, Mito_ID, Frame) %>%
+  group_by(Date, Condition, Dish, Cell, Mito_ID) %>%
+  summarise(F0 = mean(head(Intensity, 10)), Fmax = max(Intensity),
+            n_Frames = n_distinct(Frame), .groups = "drop") %>%
+  filter(n_Frames >= 10, is.finite(F0), is.finite(Fmax), F0 > 0, Fmax > 0) %>%
+  mutate(Mito_pH = pKa - log10(((1 + 10^(pKa - 7.4)) / (F0 / Fmax)) - 1)) %>%
+  filter(is.finite(Mito_pH)) %>%
+  mutate(Condition = factor(Condition, levels = names(spacing_map)),
+         Date = factor(Date), x_pos = unname(spacing_map[as.character(Condition)]),
+         Date_Condition = paste(Condition, Date, sep = "_"))
+
+if (!nrow(Mito_pH_df)) stop("No valid mitochondrial pH measurements remain.")
+
+Mito_pH_df %>%
+  transmute(Date, Condition = unname(condition_labels[as.character(Condition)]),
+            Dish, Cell, Mito_ID, Mito_pH = round(Mito_pH, 3))
+```
+
+## Summary
+
+```{r figs12e-summary}
+summary_table <- Mito_pH_df %>%
+  group_by(Condition) %>%
+  summarise(n_Mitochondria = n(), n_Cells = n_distinct(Date, Dish, Cell),
+            n_Experiment_Dates = n_distinct(Date), Mean = mean(Mito_pH),
+            SE = sd(Mito_pH) / sqrt(n()), .groups = "drop") %>%
+  mutate(Condition = unname(condition_labels[as.character(Condition)]),
+         across(c(Mean, SE), \(x) round(x, 3)))
+
+summary_table
+```
+
+## Statistics
+
+Two-way ANOVA with condition, experiment date, and their interaction (Type I sums of squares).
+
+```{r figs12e-statistics}
+format_p <- function(p) ifelse(p < 0.0001, "<0.0001", sprintf("%.4f", p))
+p_to_stars <- function(p) case_when(
+  p < 0.001 ~ "***", p < 0.01 ~ "**", p < 0.05 ~ "*", TRUE ~ "ns"
+)
+
+fit_aov <- aov(Mito_pH ~ Condition * Date, data = Mito_pH_df)
+anova_results <- anova(fit_aov)
+condition_p <- as.numeric(anova_results["Condition", "Pr(>F)"])
+
+anova_table <- as.data.frame(anova_results) %>%
+  tibble::rownames_to_column("Effect") %>%
+  filter(trimws(Effect) != "Residuals") %>%
+  transmute(Test = "Two-way ANOVA", Effect = gsub(":", " x ", trimws(Effect)),
+            df = Df, F = round(`F value`, 3), `p value` = format_p(`Pr(>F)`))
+
+group_means <- Mito_pH_df %>%
+  group_by(Condition) %>%
+  summarise(Mean = mean(Mito_pH), SE = sd(Mito_pH) / sqrt(n()), .groups = "drop")
+
+stats_table <- tibble(
+  Test = "Two-way ANOVA", Comparison = "Control vs TTX",
+  `Control mean (SE)` = sprintf("%.3f (%.3f)", group_means$Mean[1], group_means$SE[1]),
+  `TTX mean (SE)` = sprintf("%.3f (%.3f)", group_means$Mean[2], group_means$SE[2]),
+  `Condition p` = format_p(condition_p)
+)
+
+anova_table
+stats_table
+```
+
+## Plot
+
+```{r figs12e-plot, fig.width=15, fig.height=20}
+set.seed(20261109)
+date_levels <- levels(Mito_pH_df$Date)
+date_colors <- c(
+  setNames(rep(c("#777B7E", "#9E9E9E", "#BDBDBD"), length.out = length(date_levels)),
+           paste("Control MitoPKI", date_levels, sep = "_")),
+  setNames(rep(c("#1A1A1A", "#303030", "#4D4D4D"), length.out = length(date_levels)),
+           paste("TTX MitoPKI", date_levels, sep = "_"))
+)
+
+plot_stats <- tibble(x1 = 1, x2 = 2.2, y = 7.45,
+                     stars = p_to_stars(condition_p)) %>%
+  filter(stars != "ns")
+
+figs12e_plot <- ggplot(Mito_pH_df, aes(x_pos, Mito_pH, color = Date_Condition)) +
+  ggbeeswarm::geom_beeswarm(cex = 5, priority = "random", size = 15, corral = "random") +
+  geom_boxplot(aes(group = x_pos), fill = NA, width = 1, outlier.shape = NA,
+               linewidth = 2, color = "black") +
+  stat_summary(aes(group = x_pos), fun = mean, geom = "point",
+               shape = 15, size = 20, color = "black") +
+  geom_segment(data = plot_stats, aes(x = x1, xend = x2, y = y, yend = y),
+               inherit.aes = FALSE, linewidth = 2, color = "black") +
+  geom_text(data = plot_stats, aes(x = (x1 + x2) / 2, y = y + 0.04, label = stars),
+            inherit.aes = FALSE, size = 25, color = "black") +
+  scale_x_continuous(breaks = unname(spacing_map),
+                     labels = c("control", "homeostatic\nplasticity")) +
+  scale_color_manual(values = date_colors) +
+  scale_y_continuous(oob = scales::oob_keep, breaks = c(6.5, 6.8, 7.1, 7.4),
+                     limits = c(6.3, 7.6), expand = c(0, 0)) +
+  labs(x = NULL, y = "pH<sub>mito</sub>") +
+  theme_classic() +
+  theme(axis.title.y = ggtext::element_markdown(size = 80, color = "black"),
+        axis.text = element_text(size = 80, color = "black"),
+        axis.ticks = element_line(linewidth = 5, color = "black"),
+        axis.ticks.length = grid::unit(0.5, "cm"),
+        axis.line = element_line(linewidth = 2, color = "black"),
+        legend.position = "none")
+
+figs12e_plot
+```
+
+```{r figs12e-save, include=FALSE}
+dir.create("./Graphs", recursive = TRUE, showWarnings = FALSE)
+output_file <- "./Graphs/Fig S12E.png"
+ggsave(output_file, figs12e_plot, width = 15, height = 20, units = "in", dpi = 300, bg = "white")
+tibble(Figure = "Fig S12E", File = output_file)
+```
+
+# Fig S12F
+
+mEPSC peak-amplitude distribution following homeostatic plasticity in Matrix-PKI-expressing neurons.
+
+**Source data**  
+`Fig S12F.csv`
+
+**Columns**
+
+- `Date` — Experiment date
+- `Condition` — Control or TTX
+- `Cell` — Cell ID
+- `Peak_Amp` — Signed mEPSC peak amplitude (pA)
+
+## Data
+
+```{r figs12f-data}
+suppressPackageStartupMessages({
+  library(dplyr); library(readr); library(ggplot2)
+})
+
+REMOVE_CONTROL <- TRUE
+condition_order <- c("Control", "Control MitoPKI", "TTX MitoPKI")
+condition_colors <- c("Control" = "#BDBDBD", "Control MitoPKI" = "#9E9E9E", "TTX MitoPKI" = "#1A1A1A")
+
+Events <- read_csv("./Fig S12F.csv", show_col_types = FALSE) %>%
+  transmute(Date = trimws(as.character(Date)), Condition = trimws(as.character(Condition)),
+            Cell = as.character(Cell), Peak_Amp = as.numeric(Peak_Amp)) %>%
+  filter(Condition %in% condition_order, Date != "", is.finite(Peak_Amp)) %>%
+  mutate(Condition = factor(Condition, levels = condition_order))
+
+if (REMOVE_CONTROL) Events <- Events %>% filter(Condition != "Control") %>% droplevels()
+if (n_distinct(Events$Condition) < 2) stop("At least two conditions are required.")
+
+Events %>% mutate(Peak_Amp = round(Peak_Amp, 3))
+```
+
+## Summary
+
+```{r figs12f-summary}
+summary_table <- Events %>%
+  group_by(Condition) %>%
+  summarise(n_Events = n(), n_Cells = n_distinct(Date, Cell),
+            n_Experiment_Dates = n_distinct(Date), .groups = "drop")
+
+summary_table
+```
+
+## Statistics
+
+Two-sided Kolmogorov–Smirnov test on signed event amplitudes.
+
+```{r figs12f-statistics}
+format_p <- function(p) ifelse(p < 0.0001, "<0.0001", sprintf("%.4f", p))
+condition_pairs <- combn(levels(Events$Condition), 2, simplify = FALSE)
+
+stats_table <- bind_rows(lapply(condition_pairs, function(pair) {
+  test <- suppressWarnings(ks.test(
+    Events %>% filter(Condition == pair[1]) %>% pull(Peak_Amp),
+    Events %>% filter(Condition == pair[2]) %>% pull(Peak_Amp)
+  ))
+  tibble(Test = "Kolmogorov-Smirnov test",
+         Comparison = paste(pair, collapse = " vs "),
+         D = round(unname(test$statistic), 3),
+         `p value` = format_p(test$p.value))
+}))
+
+stats_table
+```
+
+## Plot
+
+```{r figs12f-plot, fig.width=22, fig.height=20}
+set.seed(20261109)
+figs12f_plot <- ggplot(Events, aes(Peak_Amp, color = Condition)) +
+  stat_ecdf(geom = "line", linewidth = 7) +
+  annotate("text", x = -15, y = 0.5, label = "control",
+           color = "#9E9E9E", hjust = 0, size = 30) +
+  annotate("text", x = -15, y = 0.3, label = paste0("homeostatic\nplasticity\np = ", stats_table$`p value`[1]),
+           color = "#1A1A1A", hjust = 0, size = 30) +
+  scale_x_reverse(oob = scales::oob_keep, limits = c(0, -35), breaks = c(-10, -20, -30), expand = c(0, 0)) +
+  scale_y_continuous(oob = scales::oob_keep, limits = c(0, 1.03), breaks = seq(0, 1, 0.2),
+                     labels = function(x) x * 100, expand = c(0, 0)) +
+  scale_color_manual(values = condition_colors) +
+  labs(x = "peak amplitude (pA)", y = "% of events") +
+  theme_classic() +
+  theme(axis.title = element_text(size = 80, color = "black"),
+        axis.text = element_text(size = 80, color = "black"),
+        axis.ticks = element_line(linewidth = 5, color = "black"),
+        axis.ticks.length = grid::unit(0.5, "cm"),
+        axis.line = element_line(linewidth = 2, color = "black"),
+        legend.position = "none")
+
+figs12f_plot
+```
+
+```{r figs12f-save, include=FALSE}
+dir.create("./Graphs", recursive = TRUE, showWarnings = FALSE)
+output_file <- "./Graphs/Fig S12F.png"
+ggsave(output_file, figs12f_plot, width = 22, height = 20, units = "in", dpi = 300, bg = "white")
+tibble(Figure = "Fig S12F", File = output_file)
+```
+
+# Fig S12G
+
+Mitochondrial pH time courses used to correct ATP measurements in Fig 6G.
+
+**update for 2026 pending** — The source contains group means and SEs. Individual pH traces and replicate IDs are unavailable.
+
+**Source data**  
+`Fig S12G.csv`
+
+**Columns**
+
+- `Control` — Mean mitochondrial pH in control neurons
+- `Control_SE` — SE of the corresponding mean pH
+- `PKI` — Mean mitochondrial pH in Matrix-PKI neurons
+- `PKI_SE` — SE of the corresponding mean pH
+
+## Data
+
+Measurements are spaced 20 s apart, with nine baseline observations and a post-induction interval from 2 to 12 min.
+
+```{r figs12g-data}
+suppressPackageStartupMessages({
+  library(dplyr); library(readr); library(ggplot2); library(ggtext)
+})
+
+N_BASELINE_POINTS <- 9
+TIME_INTERVAL_SECONDS <- 20
+POST_STIM_START_MINUTES <- 2
+ERRORBAR_TIMEPOINTS <- c(3, 9, 10)
+ERRORBAR_TIMES <- c(4, 6, 8, 10, 12)
+X_BREAKS <- c(-2, 0, 2, 4, 6, 8, 10, 12)
+Y_LIMITS <- c(6.6, 7.5)
+Y_BREAKS <- c(6.6, 6.8, 7.0, 7.2, 7.4)
+condition_order <- c("Control", "PKI")
+condition_colors <- c(Control = "#777B7E", PKI = "#1A1A1A")
+
+row_to_minutes <- function(timepoint) {
+  ifelse(timepoint <= N_BASELINE_POINTS,
+         (timepoint - N_BASELINE_POINTS) * TIME_INTERVAL_SECONDS / 60,
+         POST_STIM_START_MINUTES +
+           (timepoint - N_BASELINE_POINTS - 1) * TIME_INTERVAL_SECONDS / 60)
+}
+
+pH_wide <- read_csv("./Fig S12G.csv", show_col_types = FALSE)
+required_columns <- c("Control", "Control_SE", "PKI", "PKI_SE")
+missing_columns <- setdiff(required_columns, names(pH_wide))
+if (length(missing_columns)) stop("Missing columns: ", paste(missing_columns, collapse = ", "))
+
+pH_data <- bind_rows(
+  pH_wide %>% transmute(Timepoint = row_number(), Condition = "Control",
+                        pH = as.numeric(Control), SE = as.numeric(Control_SE)),
+  pH_wide %>% transmute(Timepoint = row_number(), Condition = "PKI",
+                        pH = as.numeric(PKI), SE = as.numeric(PKI_SE))
+) %>%
+  mutate(Time = row_to_minutes(Timepoint),
+         Condition = factor(Condition, levels = condition_order)) %>%
+  filter(is.finite(Time), is.finite(pH)) %>%
+  arrange(Condition, Timepoint)
+
+if (!nrow(pH_data)) stop("No valid pH measurements were found.")
+if (any(count(pH_data, Condition)$n < N_BASELINE_POINTS))
+  stop("Each condition must contain at least nine baseline time points.")
+
+pH_wide %>% mutate(across(all_of(required_columns), ~ round(as.numeric(.x), 3)))
+```
+
+## Summary
+
+```{r figs12g-summary}
+baseline_table <- pH_data %>%
+  filter(Timepoint <= N_BASELINE_POINTS) %>%
+  group_by(Condition) %>%
+  summarise(`Baseline mean pH` = mean(pH), .groups = "drop") %>%
+  mutate(`Baseline mean pH` = round(`Baseline mean pH`, 3))
+
+baseline_table
+```
+
+## Statistics
+
+Mean ± SE.
+
+## Plot
+
+The red bar marks single-spine induction from 0 to 2 min.
+
+```{r figs12g-plot, fig.width=30, fig.height=20}
+set.seed(20261109)
+baseline_lines <- baseline_table %>%
+  transmute(Condition, baseline_pH = `Baseline mean pH`)
+
+pH_errorbars <- pH_data %>%
+  filter(Timepoint %in% ERRORBAR_TIMEPOINTS |
+           round(Time, 6) %in% round(ERRORBAR_TIMES, 6),
+         is.finite(SE))
+
+figs12g_plot <- ggplot(pH_data, aes(Time, pH, color = Condition, group = Condition)) +
+  geom_hline(data = baseline_lines, aes(yintercept = baseline_pH),
+             inherit.aes = FALSE, color = "grey50", linetype = "dashed", linewidth = 3) +
+  geom_line(linewidth = 5) +
+  geom_point(size = 20) +
+  geom_errorbar(data = pH_errorbars, aes(ymin = pH - SE, ymax = pH + SE),
+                width = 0.2, linewidth = 4, na.rm = TRUE) +
+  scale_color_manual(values = condition_colors, breaks = condition_order) +
+  scale_x_continuous(breaks = X_BREAKS, labels = X_BREAKS,
+                     expand = expansion(add = c(0.15, 0.15))) +
+  scale_y_continuous(oob = scales::oob_keep, limits = Y_LIMITS, breaks = Y_BREAKS, expand = c(0, 0)) +
+  labs(x = "time since plasticity induction (min)", y = "pH<sub>mito</sub>") +
+  annotate("segment",x=0,xend=2,y=7.48,yend=7.48,color="#D00000",linewidth=6) +
+  theme_classic() +
+  theme(axis.title.x = element_text(size = 80, color = "black"),
+        axis.title.y = ggtext::element_markdown(size = 80, color = "black"),
+        axis.text = element_text(size = 80, color = "black"),
+        axis.ticks = element_line(linewidth = 4, color = "black"),
+        axis.ticks.length = grid::unit(0.4, "cm"),
+        axis.line = element_line(linewidth = 2, color = "black"),
+        legend.position = "bottom", legend.text = element_text(size=30), legend.title = element_blank())
+
+figs12g_plot
+```
+
+```{r figs12g-save, include=FALSE}
+dir.create("./Graphs", recursive = TRUE, showWarnings = FALSE)
+output_file <- "./Graphs/Fig S12G.png"
+ggsave(output_file, figs12g_plot, width = 30, height = 20, units = "in", dpi = 300, bg = "white")
+tibble(Figure = "Fig S12G", File = output_file)
+```

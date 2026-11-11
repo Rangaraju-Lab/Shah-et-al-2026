@@ -1,0 +1,1049 @@
+---
+title: "Figure S2: ATP and pH controls"
+knit: (function(inputFile, encoding) { inputFile <- normalizePath(inputFile); oldwd <- setwd(dirname(inputFile)); on.exit(setwd(oldwd)); rmarkdown::render(basename(inputFile), encoding = encoding, output_file = "Fig S2.html", knit_root_dir = getwd()) })
+output:
+  html_document:
+    theme: darkly
+    highlight: breezedark
+    df_print: paged
+    toc: true
+    toc_depth: 1
+    toc_float: true
+    code_folding: hide
+    self_contained: true
+    mathjax: null
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE,
+                      fig.width = 30, fig.height = 20, fig.retina = 1,
+                      out.width = "100%", fig.align = "center")
+
+set.seed(20261109)
+options(width = 120, dplyr.summarise.inform = FALSE)
+options(contrasts = c("contr.treatment", "contr.poly"))
+
+```
+
+# Fig S2A
+
+Mitochondrial pH under control and homeostatic-plasticity conditions in wild-type neurons.
+
+**Source data**  
+`Fig S2A.csv`
+
+**Columns**
+
+- `Date` — Experiment date
+- `Condition` — Control or TTX
+- `Dish` — Culture dish ID
+- `Cell` — Cell ID
+- `Mito_ID` — Mitochondrial trace ID
+- `Frame` — Imaging frame
+- `Intensity` — pH sensor fluorescence
+
+## Data
+
+pH is estimated per trace using mean fluorescence over the first ten frames, peak fluorescence, pKa 7.1, and a reference pH of 7.4.
+
+```{r fig-s2a-data}
+suppressPackageStartupMessages({
+  library(dplyr); library(readr); library(ggplot2); library(ggbeeswarm); library(ggtext)
+})
+
+pKa <- 7.1
+spacing_map <- c(Control = 1, TTX = 2.2)
+
+pH_frames <- read_csv("./Fig S2A.csv", show_col_types = FALSE) %>%
+  select(Date, Condition, Dish, Cell, Mito_ID, Frame, Intensity) %>%
+  mutate(Date = trimws(as.character(Date)), Condition = trimws(as.character(Condition)),
+         Frame = as.numeric(Frame), Intensity = as.numeric(Intensity)) %>%
+  filter(Condition %in% names(spacing_map), Date != "", is.finite(Frame),
+         is.finite(Intensity)) %>%
+  group_by(Date, Condition, Dish, Cell, Mito_ID, Frame) %>%
+  summarise(Intensity = mean(Intensity), .groups = "drop")
+
+pH_summary_Mito <- pH_frames %>%
+  group_by(Date, Condition, Dish, Cell, Mito_ID) %>%
+  summarise(F0 = mean(Intensity[Frame %in% head(sort(unique(Frame)), 10)]),
+            Fmax = max(Intensity), n_Frames = n_distinct(Frame), .groups = "drop") %>%
+  filter(n_Frames >= 10, F0 > 0, Fmax > 0) %>%
+  mutate(Mito_pH = pKa - log10((1 + 10^(pKa - 7.4)) / (F0 / Fmax) - 1)) %>%
+  filter(is.finite(Mito_pH)) %>%
+  mutate(Date = factor(Date), Condition = factor(Condition, levels = names(spacing_map)),
+         DateCondition = paste(Condition, Date, sep = "_"),
+         x_pos = unname(spacing_map[as.character(Condition)]))
+
+if (n_distinct(pH_summary_Mito$Condition) < 2 || n_distinct(pH_summary_Mito$Date) < 2)
+  stop("Both conditions and at least two dates are required.")
+
+pH_summary_Mito %>% select(Date, Condition, Dish, Cell, Mito_ID, Mito_pH) %>%
+  mutate(Mito_pH = round(Mito_pH, 3))
+```
+
+## Summary
+
+```{r fig-s2a-summary}
+summary_table <- pH_summary_Mito %>% group_by(Condition) %>%
+  summarise(n_Mitochondria = n(), n_Cells = n_distinct(Date, Dish, Cell),
+            n_Experiment_Dates = n_distinct(Date),
+            `Mean (SE)` = sprintf("%.3f (%.3f)", mean(Mito_pH),
+                                  sd(Mito_pH) / sqrt(n())), .groups = "drop")
+summary_table
+```
+
+## Statistics
+
+Two-way ANOVA with condition, experiment date, and their interaction (Type I sums of squares).
+
+```{r fig-s2a-statistics}
+fit_aov <- aov(Mito_pH ~ Condition * Date, data = pH_summary_Mito)
+condition_p <- as.numeric(anova(fit_aov)["Condition", "Pr(>F)"])
+format_p <- function(p) ifelse(p < 0.0001, "<0.0001", sprintf("%.4f", p))
+
+stats_table <- tibble(
+  Test = "Two-way ANOVA", Comparison = "Control vs TTX",
+  `Control mean (SE)` = summary_table$`Mean (SE)`[summary_table$Condition == "Control"],
+  `TTX mean (SE)` = summary_table$`Mean (SE)`[summary_table$Condition == "TTX"],
+  `Condition p` = format_p(condition_p)
+)
+stats_table
+
+anova(fit_aov)
+```
+
+## Plot
+
+```{r fig-s2a-plot, fig.width=15, fig.height=20}
+set.seed(20261109)
+date_levels <- levels(pH_summary_Mito$Date)
+date_colors <- c(
+  setNames(rep(c("#999999", "#E0E0E0", "#C8C8C8"), length.out = length(date_levels)),
+           paste("Control", date_levels, sep = "_")),
+  setNames(rep(c("#000000", "#606060", "#303030"), length.out = length(date_levels)),
+           paste("TTX", date_levels, sep = "_"))
+)
+test_results <- tibble(
+  group1_x = spacing_map["Control"], group2_x = spacing_map["TTX"], y_position = 7.48,
+  stars = case_when(condition_p < 0.001 ~ "***", condition_p < 0.01 ~ "**",
+                    condition_p < 0.05 ~ "*", TRUE ~ "ns")
+) %>% filter(stars != "ns")
+
+figs2a_plot <- ggplot(pH_summary_Mito, aes(x_pos, Mito_pH, color = DateCondition)) +
+  geom_boxplot(aes(group = x_pos), fill = NA, width = 1, outlier.shape = NA,
+               linewidth = 2, color = "black") +
+  ggbeeswarm::geom_beeswarm(cex = 3, priority = "random", size = 10, corral = "random") +
+  stat_summary(aes(group = x_pos), fun = mean, geom = "point",
+               shape = 15, size = 20, color = "black") +
+  geom_segment(data = test_results,
+               aes(x = group1_x, xend = group2_x, y = y_position, yend = y_position),
+               inherit.aes = FALSE, linewidth = 2, color = "black") +
+  geom_text(data = test_results,
+            aes(x = (group1_x + group2_x) / 2, y = y_position + 0.04, label = stars),
+            inherit.aes = FALSE, size = 25, color = "black") +
+  scale_x_continuous(breaks = unname(spacing_map),
+                     labels = c("control", "homeostatic\nplasticity")) +
+  scale_y_continuous(oob = scales::oob_keep, breaks = c(6.5, 6.8, 7.1, 7.4),
+                     limits = c(6.3, 7.6), expand = c(0, 0)) +
+  scale_color_manual(values = date_colors) +
+  labs(x = NULL, y = "pH<sub>mito</sub>") +
+  theme_classic() +
+  theme(axis.title.y = ggtext::element_markdown(size = 80, color = "black"),
+        axis.text = element_text(size = 80, color = "black"),
+        axis.ticks = element_line(linewidth = 5, color = "black"),
+        axis.ticks.length = grid::unit(0.5, "cm"),
+        axis.line = element_line(linewidth = 2, color = "black"),
+        legend.position = "none")
+figs2a_plot
+```
+
+```{r fig-s2a-save, include=FALSE}
+dir.create("./Graphs", recursive = TRUE, showWarnings = FALSE)
+ggsave("./Graphs/Fig S2A.png", figs2a_plot, width = 15, height = 20,
+       units = "in", dpi = 300)
+tibble(Figure = "Fig S2A", File = "./Graphs/Fig S2A.png")
+```
+
+# Fig S2B
+
+Mitochondrial pH after MPC1 knockdown under control and homeostatic-plasticity conditions.
+
+**Source data**  
+`Fig S2B.csv`
+
+**Columns**
+
+- `Date` — Experiment date
+- `Condition` — Control or TTX after MPC1 knockdown
+- `Dish` — Culture dish ID
+- `Cell` — Cell ID
+- `Mito_ID` — Mitochondrial trace ID
+- `Frame` — Imaging frame
+- `Intensity` — pH sensor fluorescence
+
+## Data
+
+pH is estimated per trace using mean fluorescence over the first ten frames, peak fluorescence, pKa 7.1, and a reference pH of 7.4.
+
+```{r figs2b-data}
+suppressPackageStartupMessages({
+  library(dplyr); library(readr); library(ggplot2); library(ggbeeswarm); library(ggtext)
+})
+
+spacing_map <- c("Control MPC1KD" = 1, "TTX MPC1KD" = 2.2)
+pKa <- 7.1
+
+pH_df <- read_csv("./Fig S2B.csv", show_col_types = FALSE) %>%
+  filter(Condition %in% names(spacing_map), is.finite(Frame), is.finite(Intensity)) %>%
+  group_by(Date, Condition, Dish, Cell, Mito_ID, Frame) %>%
+  summarise(Intensity = mean(Intensity), .groups = "drop")
+
+mito_df <- pH_df %>%
+  group_by(Date, Condition, Dish, Cell, Mito_ID) %>%
+  summarise(n_Frames = n_distinct(Frame),
+            F0 = mean(Intensity[Frame %in% head(sort(unique(Frame)), 10)]),
+            Fmax = max(Intensity), .groups = "drop") %>%
+  filter(n_Frames >= 10, F0 > 0, Fmax > 0) %>%
+  mutate(Mito_pH = pKa - log10((1 + 10^(pKa - 7.4)) / (F0 / Fmax) - 1)) %>%
+  filter(is.finite(Mito_pH)) %>%
+  mutate(Condition = factor(Condition, levels = names(spacing_map)),
+         Date = factor(Date), x_pos = unname(spacing_map[as.character(Condition)]),
+         Date_Condition = paste(Condition, Date, sep = "_"))
+
+if (nrow(mito_df) == 0) stop("No valid mitochondria remain.")
+mito_df %>% transmute(Date, Condition, Dish, Cell, Mito_ID, Mito_pH = round(Mito_pH, 3))
+```
+
+## Summary
+
+```{r figs2b-summary}
+summary_table <- mito_df %>%
+  group_by(Condition) %>%
+  summarise(n_Mitochondria = n(), n_Cells = n_distinct(Date, Dish, Cell),
+            n_Experiment_Dates = n_distinct(Date), .groups = "drop")
+summary_table
+```
+
+## Statistics
+
+Two-way ANOVA with condition, experiment date, and their interaction (Type I sums of squares).
+
+```{r figs2b-statistics}
+fit_aov <- aov(Mito_pH ~ Condition * Date, data = mito_df)
+condition_p <- as.numeric(anova(fit_aov)["Condition", "Pr(>F)"])
+format_p <- function(p) ifelse(p < 0.0001, "<0.0001", sprintf("%.4f", p))
+
+means <- mito_df %>% group_by(Condition) %>%
+  summarise(mean = mean(Mito_pH), SE = sd(Mito_pH) / sqrt(n()), .groups = "drop")
+stats_table <- tibble(
+  Test = "Two-way ANOVA", Comparison = "Control MPC1KD vs TTX MPC1KD",
+  `Control mean (SE)` = sprintf("%.3f (%.3f)", means$mean[1], means$SE[1]),
+  `TTX mean (SE)` = sprintf("%.3f (%.3f)", means$mean[2], means$SE[2]),
+  `Condition p` = format_p(condition_p)
+)
+stats_table
+
+anova(fit_aov)
+```
+
+## Plot
+
+```{r figs2b-plot, fig.width=15, fig.height=20, out.width="75%"}
+set.seed(20261109)
+date_levels <- levels(mito_df$Date)
+date_colors <- c(
+  setNames(rep(c("#999999", "#E0E0E0", "#C8C8C8"), length.out = length(date_levels)),
+           paste("Control MPC1KD", date_levels, sep = "_")),
+  setNames(rep(c("#000000", "#606060", "#303030"), length.out = length(date_levels)),
+           paste("TTX MPC1KD", date_levels, sep = "_"))
+)
+stars <- case_when(condition_p < 0.001 ~ "***", condition_p < 0.01 ~ "**",
+                   condition_p < 0.05 ~ "*", TRUE ~ "ns")
+plot_stats <- tibble(x1 = 1, x2 = 2.2, y = 7.48, stars = stars) %>% filter(stars != "ns")
+
+figs2b_plot <- ggplot(mito_df, aes(x_pos, Mito_pH, color = Date_Condition)) +
+  ggbeeswarm::geom_beeswarm(cex = 3, priority = "random", size = 10, corral = "random") +
+  geom_boxplot(aes(group = x_pos), fill = NA, width = 1, outlier.shape = NA,
+               linewidth = 2, color = "black") +
+  stat_summary(aes(group = x_pos), fun = mean, geom = "point",
+               shape = 15, size = 20, color = "black") +
+  geom_segment(data = plot_stats, aes(x = x1, xend = x2, y = y, yend = y),
+               inherit.aes = FALSE, linewidth = 2, color = "black") +
+  geom_text(data = plot_stats, aes(x = (x1 + x2) / 2, y = y + 0.04, label = stars),
+            inherit.aes = FALSE, size = 25, color = "black") +
+  scale_x_continuous(breaks = unname(spacing_map),
+                     labels = c("control", "homeostatic\nplasticity")) +
+  scale_y_continuous(oob = scales::oob_keep, breaks = c(6.5, 6.8, 7.1, 7.4),
+                     limits = c(6.3, 7.6), expand = c(0, 0)) +
+  scale_color_manual(values = date_colors) +
+  labs(x = NULL, y = "pH<sub>mito</sub>") +
+  theme_classic() +
+  theme(axis.title.y = ggtext::element_markdown(size = 80, color = "black"),
+        axis.text = element_text(size = 80, color = "black"),
+        axis.ticks = element_line(linewidth = 5, color = "black"),
+        axis.ticks.length = grid::unit(0.5, "cm"),
+        axis.line = element_line(linewidth = 2, color = "black"),
+        legend.position = "none")
+figs2b_plot
+```
+
+```{r figs2b-save, include=FALSE}
+dir.create("./Graphs", recursive = TRUE, showWarnings = FALSE)
+ggsave("./Graphs/Fig S2B.png", figs2b_plot, width = 15, height = 20, units = "in", dpi = 300)
+tibble(Figure = "Fig S2B", File = "./Graphs/Fig S2B.png")
+```
+
+# Fig S2C
+
+Axonal mitochondrial ATP reporter L/F following homeostatic plasticity.
+
+**Source data**  
+`Fig S2C.csv`
+
+**Columns**
+
+- `Date` — Experiment date
+- `Condition` — Control or TTX
+- `Dish` — Culture dish ID
+- `Cell` — Cell ID
+- `Mito` — Mitochondrion ID
+- `Slice` — Image slice ID
+- `L` — Luciferase luminescence
+- `F` — Reporter fluorescence
+- `LbyF` — Luminescence-to-fluorescence ratio (L/F)
+
+## Data
+
+```{r figs2c-data}
+suppressPackageStartupMessages({
+  library(dplyr); library(readr); library(ggplot2); library(ggbeeswarm); library(ggtext)
+})
+
+PLOT_CORRECTED <- TRUE
+spacing_map <- c(Control = 1, TTX = 2.2)
+pH_control <- 6.97; pH_scaling <- 6.91; pKa_L <- 7.03
+L_corr_factor <- (1 + 10^(pKa_L - pH_scaling)) / (1 + 10^(pKa_L - pH_control))
+plot_y <- if (PLOT_CORRECTED) "LbyF_corrected" else "LbyF"
+
+LbyF_df <- read_csv("./Fig S2C.csv", show_col_types = FALSE) %>%
+  mutate(Condition = trimws(as.character(Condition)),
+         LbyF_corrected = if_else(Condition == "TTX", L * L_corr_factor / F, L / F)) %>%
+  filter(Condition %in% names(spacing_map), !is.na(Date), is.finite(.data[[plot_y]])) %>%
+  mutate(Condition = factor(Condition, levels = names(spacing_map)),
+         Date = factor(Date), x_pos = unname(spacing_map[as.character(Condition)]),
+         Date_Condition = paste(Condition, Date, sep = "_"))
+
+if (nrow(LbyF_df) == 0) stop("No valid axonal mitochondria remain.")
+LbyF_df %>%
+  select(Date, Condition, Cell, any_of(c("Mito", "Mito_ID")), L, F, LbyF, LbyF_corrected) %>%
+  mutate(across(where(is.numeric), ~ round(.x, 3)))
+```
+
+## Summary
+
+```{r figs2c-summary}
+summary_table <- LbyF_df %>%
+  group_by(Condition) %>%
+  summarise(n_Mitochondria = n(), n_Cells = n_distinct(Date, Cell),
+            n_Experiment_Dates = n_distinct(Date), .groups = "drop")
+summary_table
+```
+
+## Statistics
+
+Two-way ANOVA with condition, experiment date, and their interaction (Type I sums of squares).
+
+```{r figs2c-statistics}
+fit_aov <- aov(reformulate("Condition * Date", response = plot_y), data = LbyF_df)
+condition_p <- as.numeric(anova(fit_aov)["Condition", "Pr(>F)"])
+format_p <- function(p) ifelse(p < 0.0001, "<0.0001", sprintf("%.4f", p))
+
+means <- LbyF_df %>% group_by(Condition) %>%
+  summarise(mean = mean(.data[[plot_y]]), SE = sd(.data[[plot_y]]) / sqrt(n()), .groups = "drop")
+stats_table <- tibble(
+  Test = "Two-way ANOVA", Comparison = "Control vs TTX",
+  `Control mean (SE)` = sprintf("%.3f (%.3f)", means$mean[1], means$SE[1]),
+  `TTX mean (SE)` = sprintf("%.3f (%.3f)", means$mean[2], means$SE[2]),
+  `Condition p` = format_p(condition_p)
+)
+stats_table
+
+anova(fit_aov)
+```
+
+## Plot
+
+```{r figs2c-plot, fig.width=16, fig.height=20, out.width="75%"}
+set.seed(20261109)
+date_levels <- levels(LbyF_df$Date)
+date_colors <- c(
+  setNames(rep(c("#1A1A1A", "#777B7E", "#4D4D4D"), length.out = length(date_levels)),
+           paste("Control", date_levels, sep = "_")),
+  setNames(rep(c("#FC6A03", "#ED820E", "#FFAD00"), length.out = length(date_levels)),
+           paste("TTX", date_levels, sep = "_"))
+)
+stars <- case_when(condition_p < 0.001 ~ "***", condition_p < 0.01 ~ "**",
+                   condition_p < 0.05 ~ "*", TRUE ~ "ns")
+plot_stats <- tibble(x1 = 1, x2 = 2.2, y = 0.30, stars = stars) %>% filter(stars != "ns")
+
+figs2c_plot <- ggplot(LbyF_df, aes(x_pos, .data[[plot_y]], color = Date_Condition)) +
+  geom_boxplot(aes(group = x_pos), fill = NA, width = 1, outlier.shape = NA,
+               linewidth = 2, color = "black") +
+  ggbeeswarm::geom_beeswarm(cex = 3, priority = "random", size = 10, corral = "random") +
+  stat_summary(aes(group = x_pos), fun = mean, geom = "point",
+               shape = 15, size = 20, color = "black") +
+  geom_segment(data = plot_stats, aes(x = x1, xend = x2, y = y, yend = y),
+               inherit.aes = FALSE, linewidth = 2, color = "black") +
+  geom_text(data = plot_stats, aes(x = (x1 + x2) / 2, y = y + 0.01, label = stars),
+            inherit.aes = FALSE, size = 25, color = "black") +
+  scale_x_continuous(breaks = unname(spacing_map),
+                     labels = c("control", "homeostatic\nplasticity")) +
+  scale_y_continuous(breaks = c(0, 0.1, 0.2, 0.3), expand = c(0, 0)) +
+  scale_color_manual(values = date_colors) +
+  coord_cartesian(ylim = c(0, 0.33)) +
+  labs(x = NULL, y = "axonal ATP<sub>mito</sub> (L/F)") +
+  theme_classic() +
+  theme(axis.title.y = ggtext::element_markdown(size = 80, color = "black"),
+        axis.text = element_text(size = 80, color = "black"),
+        axis.ticks = element_line(linewidth = 5, color = "black"),
+        axis.ticks.length = grid::unit(0.5, "cm"),
+        axis.line = element_line(linewidth = 2, color = "black"),
+        legend.position = "none")
+figs2c_plot
+```
+
+```{r figs2c-save, include=FALSE}
+dir.create("./Graphs", recursive = TRUE, showWarnings = FALSE)
+ggsave("./Graphs/Fig S2C.png", figs2c_plot, width = 16, height = 20, units = "in", dpi = 300)
+tibble(Figure = "Fig S2C", File = "./Graphs/Fig S2C.png")
+```
+
+# Fig S2D
+
+Axonal mitochondrial pH following homeostatic plasticity.
+
+**Source data**  
+`Fig S2D.csv`
+
+**Columns**
+
+- `Date` — Experiment date
+- `Condition` — Control or TTX
+- `Dish` — Culture dish ID
+- `Cell` — Cell ID
+- `Mito_ID` — Mitochondrial trace ID
+- `Frame` — Imaging frame
+- `Intensity` — pH sensor fluorescence
+
+## Data
+
+pH is estimated per trace using mean fluorescence over the first ten frames, peak fluorescence, pKa 7.1, and a reference pH of 7.4.
+
+```{r figs2d-data}
+suppressPackageStartupMessages({
+  library(dplyr); library(readr); library(ggplot2); library(ggbeeswarm); library(ggtext)
+})
+
+spacing_map <- c(Control = 1, TTX = 2.2)
+pKa <- 7.1
+
+pH_df <- read_csv("./Fig S2D.csv", show_col_types = FALSE) %>%
+  filter(Condition %in% names(spacing_map), is.finite(Frame), is.finite(Intensity)) %>%
+  group_by(Date, Condition, Dish, Cell, Mito_ID, Frame) %>%
+  summarise(Intensity = mean(Intensity), .groups = "drop")
+
+mito_df <- pH_df %>%
+  group_by(Date, Condition, Dish, Cell, Mito_ID) %>%
+  summarise(n_Frames = n_distinct(Frame),
+            F0 = mean(Intensity[Frame %in% head(sort(unique(Frame)), 10)]),
+            Fmax = max(Intensity), .groups = "drop") %>%
+  filter(n_Frames >= 10, F0 > 0, Fmax > 0) %>%
+  mutate(Mito_pH = pKa - log10((1 + 10^(pKa - 7.4)) / (F0 / Fmax) - 1)) %>%
+  filter(is.finite(Mito_pH), Mito_pH > 0) %>%
+  mutate(Condition = factor(Condition, levels = names(spacing_map)),
+         Date = factor(Date), x_pos = unname(spacing_map[as.character(Condition)]),
+         Date_Condition = paste(Condition, Date, sep = "_"))
+
+if (nrow(mito_df) == 0) stop("No valid axonal mitochondria remain.")
+mito_df %>% transmute(Date, Condition, Dish, Cell, Mito_ID, Mito_pH = round(Mito_pH, 3))
+```
+
+## Summary
+
+```{r figs2d-summary}
+summary_table <- mito_df %>%
+  group_by(Condition) %>%
+  summarise(n_Mitochondria = n(), n_Cells = n_distinct(Date, Dish, Cell),
+            n_Experiment_Dates = n_distinct(Date), .groups = "drop")
+summary_table
+```
+
+## Statistics
+
+Two-way ANOVA with condition, experiment date, and their interaction (Type I sums of squares).
+
+```{r figs2d-statistics}
+fit_aov <- aov(Mito_pH ~ Condition * Date, data = mito_df)
+condition_p <- as.numeric(anova(fit_aov)["Condition", "Pr(>F)"])
+format_p <- function(p) ifelse(p < 0.0001, "<0.0001", sprintf("%.4f", p))
+
+means <- mito_df %>% group_by(Condition) %>%
+  summarise(mean = mean(Mito_pH), SE = sd(Mito_pH) / sqrt(n()), .groups = "drop")
+stats_table <- tibble(
+  Test = "Two-way ANOVA", Comparison = "Control vs TTX",
+  `Control mean (SE)` = sprintf("%.3f (%.3f)", means$mean[1], means$SE[1]),
+  `TTX mean (SE)` = sprintf("%.3f (%.3f)", means$mean[2], means$SE[2]),
+  `Condition p` = format_p(condition_p)
+)
+stats_table
+
+anova(fit_aov)
+```
+
+## Plot
+
+```{r figs2d-plot, fig.width=15, fig.height=20, out.width="75%"}
+set.seed(20261109)
+date_levels <- levels(mito_df$Date)
+date_colors <- c(
+  setNames(rep(c("#999999", "#E0E0E0", "#C8C8C8"), length.out = length(date_levels)),
+           paste("Control", date_levels, sep = "_")),
+  setNames(rep(c("#000000", "#606060", "#303030"), length.out = length(date_levels)),
+           paste("TTX", date_levels, sep = "_"))
+)
+stars <- case_when(condition_p < 0.001 ~ "***", condition_p < 0.01 ~ "**",
+                   condition_p < 0.05 ~ "*", TRUE ~ "ns")
+plot_stats <- tibble(x1 = 1, x2 = 2.2, y = 7.48, stars = stars) %>% filter(stars != "ns")
+
+figs2d_plot <- ggplot(mito_df, aes(x_pos, Mito_pH, color = Date_Condition)) +
+  geom_boxplot(aes(group = x_pos), fill = NA, width = 1, outlier.shape = NA,
+               linewidth = 2, color = "black") +
+  ggbeeswarm::geom_beeswarm(cex = 3, priority = "random", size = 10, corral = "random") +
+  stat_summary(aes(group = x_pos), fun = mean, geom = "point",
+               shape = 15, size = 20, color = "black") +
+  geom_segment(data = plot_stats, aes(x = x1, xend = x2, y = y, yend = y),
+               inherit.aes = FALSE, linewidth = 2, color = "black") +
+  geom_text(data = plot_stats, aes(x = (x1 + x2) / 2, y = y + 0.04, label = stars),
+            inherit.aes = FALSE, size = 25, color = "black") +
+  scale_x_continuous(breaks = unname(spacing_map),
+                     labels = c("control", "homeostatic\nplasticity")) +
+  scale_y_continuous(oob = scales::oob_keep, breaks = c(6.2, 6.5, 6.8, 7.1, 7.4),
+                     limits = c(6, 7.6), expand = c(0, 0)) +
+  scale_color_manual(values = date_colors) +
+  labs(x = NULL, y = "axonal pH<sub>mito</sub>") +
+  theme_classic() +
+  theme(axis.title.y = ggtext::element_markdown(size = 80, color = "black"),
+        axis.text = element_text(size = 80, color = "black"),
+        axis.ticks = element_line(linewidth = 5, color = "black"),
+        axis.ticks.length = grid::unit(0.5, "cm"),
+        axis.line = element_line(linewidth = 2, color = "black"),
+        legend.position = "none")
+figs2d_plot
+```
+
+```{r figs2d-save, include=FALSE}
+dir.create("./Graphs", recursive = TRUE, showWarnings = FALSE)
+ggsave("./Graphs/Fig S2D.png", figs2d_plot, width = 15, height = 20, units = "in", dpi = 300)
+tibble(Figure = "Fig S2D", File = "./Graphs/Fig S2D.png")
+```
+
+# Fig S2E
+
+Spine ATP reporter L/F measured with TTX maintained during imaging.
+
+**Source data**  
+`Fig S2E.csv`
+
+**Columns**
+
+- `Date` — Experiment date
+- `Condition` — Control or TTX with TTX maintained during imaging
+- `Dish` — Culture dish ID
+- `Cell` — Cell ID
+- `L` — Luciferase luminescence
+- `F` — Reporter fluorescence
+- `LbyF` — Luminescence-to-fluorescence ratio (L/F)
+
+## Data
+
+```{r figs2e-data}
+suppressPackageStartupMessages({
+  library(dplyr); library(readr); library(ggplot2); library(ggbeeswarm); library(ggtext)
+})
+
+spacing_map <- c(Control = 1, TTXinTTX = 2.2)
+LbyF_df <- read_csv("./Fig S2E.csv", show_col_types = FALSE) %>%
+  select(Date, Condition, Dish, Cell, L, F, LbyF) %>%
+  mutate(Condition = trimws(as.character(Condition)),
+         Condition = case_when(grepl("^Control", Condition, ignore.case = TRUE) ~ "Control",
+                               grepl("^TTXinTTX", Condition, ignore.case = TRUE) ~ "TTXinTTX",
+                               TRUE ~ Condition)) %>%
+  filter(Condition %in% names(spacing_map), !is.na(Date), !is.na(Dish),
+         !is.na(Cell), is.finite(LbyF)) %>%
+  mutate(Condition = factor(Condition, levels = names(spacing_map)),
+         Date = factor(Date), x_pos = unname(spacing_map[as.character(Condition)]),
+         Date_Condition = paste(Condition, Date, sep = "_"))
+
+if (nrow(LbyF_df) == 0) stop("No valid observations remain.")
+LbyF_df %>% select(Date, Condition, Dish, Cell, L, F, LbyF) %>%
+  mutate(across(where(is.numeric), ~ round(.x, 3)))
+```
+
+## Summary
+
+```{r figs2e-summary}
+summary_table <- LbyF_df %>%
+  group_by(Condition) %>%
+  summarise(n_Spines = n(), n_Cells = n_distinct(Date, Dish, Cell),
+            n_Experiment_Dates = n_distinct(Date), .groups = "drop")
+summary_table
+```
+
+## Statistics
+
+Two-way ANOVA with condition, experiment date, and their interaction (Type I sums of squares).
+
+```{r figs2e-statistics}
+fit_aov <- aov(LbyF ~ Condition * Date, data = LbyF_df)
+condition_p <- as.numeric(anova(fit_aov)["Condition", "Pr(>F)"])
+format_p <- function(p) ifelse(p < 0.0001, "<0.0001", sprintf("%.4f", p))
+
+means <- LbyF_df %>% group_by(Condition) %>%
+  summarise(mean = mean(LbyF), SE = sd(LbyF) / sqrt(n()), .groups = "drop")
+stats_table <- tibble(
+  Test = "Two-way ANOVA", Comparison = "Control vs TTXinTTX",
+  `Control mean (SE)` = sprintf("%.3f (%.3f)", means$mean[1], means$SE[1]),
+  `TTXinTTX mean (SE)` = sprintf("%.3f (%.3f)", means$mean[2], means$SE[2]),
+  `Condition p` = format_p(condition_p)
+)
+stats_table
+
+anova(fit_aov)
+```
+
+## Plot
+
+```{r figs2e-plot, fig.width=15, fig.height=20, out.width="75%"}
+set.seed(20261109)
+date_levels <- levels(LbyF_df$Date)
+date_colors <- c(
+  setNames(rep(c("#1A1A1A", "#4D4D4D", "#777B7E"), length.out = length(date_levels)),
+           paste("Control", date_levels, sep = "_")),
+  setNames(rep(c("#ED820E", "#FC6A03", "#FFAD00"), length.out = length(date_levels)),
+           paste("TTXinTTX", date_levels, sep = "_"))
+)
+stars <- case_when(condition_p < 0.001 ~ "***", condition_p < 0.01 ~ "**",
+                   condition_p < 0.05 ~ "*", TRUE ~ "ns")
+plot_stats <- tibble(x1 = 1, x2 = 2.2, y = 0.84, stars = stars) %>% filter(stars != "ns")
+
+figs2e_plot <- ggplot(LbyF_df, aes(x_pos, LbyF, color = Date_Condition)) +
+  ggbeeswarm::geom_beeswarm(cex = 1.5, priority = "random", size = 8, corral = "random") +
+  geom_boxplot(aes(group = x_pos), fill = NA, width = 1, outlier.shape = NA,
+               linewidth = 2, color = "black") +
+  stat_summary(aes(group = x_pos), fun = mean, geom = "point",
+               shape = 15, size = 20, color = "black") +
+  geom_segment(data = plot_stats, aes(x = x1, xend = x2, y = y, yend = y),
+               inherit.aes = FALSE, linewidth = 2, color = "black") +
+  geom_text(data = plot_stats, aes(x = (x1 + x2) / 2, y = y + 0.03, label = stars),
+            inherit.aes = FALSE, size = 25, color = "black") +
+  scale_x_continuous(breaks = unname(spacing_map),
+                     labels = c("control", "homeostatic\nplasticity\n(in TTX)")) +
+  scale_y_continuous(breaks = c(0, 0.2, 0.4, 0.6, 0.8), expand = c(0, 0)) +
+  scale_color_manual(values = date_colors) +
+  coord_cartesian(ylim = c(0, 0.9)) +
+  labs(x = NULL, y = "ATP<sub>spine</sub> (L/F)") +
+  theme_classic() +
+  theme(axis.title.y = ggtext::element_markdown(size = 80, color = "black"),
+        axis.text = element_text(size = 80, color = "black"),
+        axis.ticks = element_line(linewidth = 5, color = "black"),
+        axis.ticks.length = grid::unit(0.5, "cm"),
+        axis.line = element_line(linewidth = 2, color = "black"),
+        legend.position = "none")
+figs2e_plot
+```
+
+```{r figs2e-save, include=FALSE}
+dir.create("./Graphs", recursive = TRUE, showWarnings = FALSE)
+ggsave("./Graphs/Fig S2E.png", figs2e_plot, width = 15, height = 20, units = "in", dpi = 300)
+tibble(Figure = "Fig S2E", File = "./Graphs/Fig S2E.png") 
+```
+
+# Fig S2F
+
+Spine pH following homeostatic plasticity in wild-type neurons.
+
+**Source data**  
+`Fig S2F.csv`
+
+**Columns**
+
+- `Date` — Experiment date
+- `Condition` — Control or TTX
+- `Dish` — Culture dish ID
+- `Cell` — Cell ID
+- `Spine_ID` — Spine trace ID
+- `Frame` — Imaging frame
+- `Intensity` — pH sensor fluorescence
+
+## Data
+
+pH is estimated per trace using mean fluorescence over the first ten frames, peak fluorescence, pKa 7.1, and a reference pH of 7.4.
+
+```{r figs2f-data}
+suppressPackageStartupMessages({
+  library(dplyr); library(readr); library(ggplot2); library(ggbeeswarm); library(ggtext)
+})
+
+spacing_map <- c(Control = 1, TTX = 2.2)
+pKa <- 7.1
+
+pH_df <- read_csv("./Fig S2F.csv", show_col_types = FALSE) %>%
+  filter(Condition %in% names(spacing_map), is.finite(Frame), is.finite(Intensity)) %>%
+  group_by(Date, Condition, Dish, Cell, Spine_ID, Frame) %>%
+  summarise(Intensity = mean(Intensity), .groups = "drop")
+
+spine_df <- pH_df %>%
+  group_by(Date, Condition, Dish, Cell, Spine_ID) %>%
+  summarise(n_Frames = n_distinct(Frame),
+            F0 = mean(Intensity[Frame %in% head(sort(unique(Frame)), 10)]),
+            Fmax = max(Intensity), .groups = "drop") %>%
+  filter(n_Frames >= 10, F0 > 0, Fmax > 0) %>%
+  mutate(Spine_pH = pKa - log10((1 + 10^(pKa - 7.4)) / (F0 / Fmax) - 1)) %>%
+  filter(is.finite(Spine_pH)) %>%
+  mutate(Condition = factor(Condition, levels = names(spacing_map)),
+         Date = factor(Date), x_pos = unname(spacing_map[as.character(Condition)]),
+         Date_Condition = paste(Condition, Date, sep = "_"))
+
+if (nrow(spine_df) == 0) stop("No valid spines remain.")
+spine_df %>% transmute(Date, Condition, Dish, Cell, Spine_ID, Spine_pH = round(Spine_pH, 3))
+```
+
+## Summary
+
+```{r figs2f-summary}
+summary_table <- spine_df %>%
+  group_by(Condition) %>%
+  summarise(n_Spines = n(), n_Cells = n_distinct(Date, Dish, Cell),
+            n_Experiment_Dates = n_distinct(Date), .groups = "drop")
+summary_table
+```
+
+## Statistics
+
+Two-way ANOVA with condition, experiment date, and their interaction (Type I sums of squares).
+
+```{r figs2f-statistics}
+fit_aov <- aov(Spine_pH ~ Condition * Date, data = spine_df)
+condition_p <- as.numeric(anova(fit_aov)["Condition", "Pr(>F)"])
+format_p <- function(p) ifelse(p < 0.0001, "<0.0001", sprintf("%.4f", p))
+
+means <- spine_df %>% group_by(Condition) %>%
+  summarise(mean = mean(Spine_pH), SE = sd(Spine_pH) / sqrt(n()), .groups = "drop")
+stats_table <- tibble(
+  Test = "Two-way ANOVA", Comparison = "Control vs TTX",
+  `Control mean (SE)` = sprintf("%.3f (%.3f)", means$mean[1], means$SE[1]),
+  `TTX mean (SE)` = sprintf("%.3f (%.3f)", means$mean[2], means$SE[2]),
+  `Condition p` = format_p(condition_p)
+)
+stats_table
+
+anova(fit_aov)
+```
+
+## Plot
+
+```{r figs2f-plot, fig.width=15, fig.height=20, out.width="75%"}
+set.seed(20261109)
+date_levels <- levels(spine_df$Date)
+date_colors <- c(
+  setNames(rep(c("#999999", "#E0E0E0", "#C8C8C8"), length.out = length(date_levels)),
+           paste("Control", date_levels, sep = "_")),
+  setNames(rep(c("#000000", "#606060", "#303030"), length.out = length(date_levels)),
+           paste("TTX", date_levels, sep = "_"))
+)
+stars <- case_when(condition_p < 0.001 ~ "***", condition_p < 0.01 ~ "**",
+                   condition_p < 0.05 ~ "*", TRUE ~ "ns")
+plot_stats <- tibble(x1 = 1, x2 = 2.2, y = 7.62, stars = stars) %>% filter(stars != "ns")
+
+figs2f_plot <- ggplot(spine_df, aes(x_pos, Spine_pH, color = Date_Condition)) +
+  geom_boxplot(aes(group = x_pos), fill = NA, width = 1, outlier.shape = NA,
+               linewidth = 2, color = "black") +
+  ggbeeswarm::geom_beeswarm(cex = 4, priority = "random", size = 10, corral = "random") +
+  stat_summary(aes(group = x_pos), fun = mean, geom = "point",
+               shape = 15, size = 20, color = "black") +
+  geom_segment(data = plot_stats, aes(x = x1, xend = x2, y = y, yend = y),
+               inherit.aes = FALSE, linewidth = 2, color = "black") +
+  geom_text(data = plot_stats, aes(x = (x1 + x2) / 2, y = y + 0.05, label = stars),
+            inherit.aes = FALSE, size = 25, color = "black") +
+  scale_x_continuous(breaks = unname(spacing_map),
+                     labels = c("control", "homeostatic\nplasticity")) +
+  scale_y_continuous(oob = scales::oob_keep, breaks = c(6, 6.5, 7, 7.5),
+                     limits = c(5.6, 7.8), expand = c(0, 0)) +
+  scale_color_manual(values = date_colors) +
+  labs(x = NULL, y = "pH<sub>spine</sub>") +
+  theme_classic() +
+  theme(axis.title.y = ggtext::element_markdown(size = 80, color = "black"),
+        axis.text = element_text(size = 80, color = "black"),
+        axis.ticks = element_line(linewidth = 5, color = "black"),
+        axis.ticks.length = grid::unit(0.5, "cm"),
+        axis.line = element_line(linewidth = 2, color = "black"),
+        legend.position = "none")
+figs2f_plot
+```
+
+```{r figs2f-save, include=FALSE}
+dir.create("./Graphs", recursive = TRUE, showWarnings = FALSE)
+ggsave("./Graphs/Fig S2F.png", figs2f_plot, width = 15, height = 20, units = "in", dpi = 300)
+tibble(Figure = "Fig S2F", File = "./Graphs/Fig S2F.png")
+```
+
+# Fig S2G
+
+Spine pH following homeostatic plasticity after MPC1 knockdown.
+
+**Source data**  
+`Fig S2G.csv`
+
+**Columns**
+
+- `Date` — Experiment date
+- `Condition` — Control or TTX after MPC1 knockdown
+- `Dish` — Culture dish ID
+- `Cell` — Cell ID
+- `Spine_ID` — Spine trace ID
+- `Frame` — Imaging frame
+- `Intensity` — pH sensor fluorescence
+
+## Data
+
+pH is estimated per trace using mean fluorescence over the first ten frames, peak fluorescence, pKa 7.1, and a reference pH of 7.4.
+
+```{r figs2g-data}
+suppressPackageStartupMessages({
+  library(dplyr); library(readr); library(ggplot2); library(ggbeeswarm); library(ggtext)
+})
+
+spacing_map <- c("Control MPC1KD" = 1, "TTX MPC1KD" = 2.2)
+pKa <- 7.1
+
+pH_df <- read_csv("./Fig S2G.csv", show_col_types = FALSE) %>%
+  filter(Condition %in% names(spacing_map), is.finite(Frame), is.finite(Intensity)) %>%
+  group_by(Date, Condition, Dish, Cell, Spine_ID, Frame) %>%
+  summarise(Intensity = mean(Intensity), .groups = "drop")
+
+spine_df <- pH_df %>%
+  group_by(Date, Condition, Dish, Cell, Spine_ID) %>%
+  summarise(n_Frames = n_distinct(Frame),
+            F0 = mean(Intensity[Frame %in% head(sort(unique(Frame)), 10)]),
+            Fmax = max(Intensity), .groups = "drop") %>%
+  filter(n_Frames >= 10, F0 > 0, Fmax > 0) %>%
+  mutate(Spine_pH = pKa - log10((1 + 10^(pKa - 7.4)) / (F0 / Fmax) - 1)) %>%
+  filter(is.finite(Spine_pH)) %>%
+  mutate(Condition = factor(Condition, levels = names(spacing_map)),
+         Date = factor(Date), x_pos = unname(spacing_map[as.character(Condition)]),
+         Date_Condition = paste(Condition, Date, sep = "_"))
+
+if (nrow(spine_df) == 0) stop("No valid spines remain.")
+spine_df %>% transmute(Date, Condition, Dish, Cell, Spine_ID, Spine_pH = round(Spine_pH, 3))
+```
+
+## Summary
+
+```{r figs2g-summary}
+summary_table <- spine_df %>%
+  group_by(Condition) %>%
+  summarise(n_Spines = n(), n_Cells = n_distinct(Date, Dish, Cell),
+            n_Experiment_Dates = n_distinct(Date), .groups = "drop")
+summary_table
+```
+
+## Statistics
+
+Two-way ANOVA with condition, experiment date, and their interaction (Type I sums of squares).
+
+```{r figs2g-statistics}
+fit_aov <- aov(Spine_pH ~ Condition * Date, data = spine_df)
+condition_p <- as.numeric(anova(fit_aov)["Condition", "Pr(>F)"])
+format_p <- function(p) ifelse(p < 0.0001, "<0.0001", sprintf("%.4f", p))
+
+means <- spine_df %>% group_by(Condition) %>%
+  summarise(mean = mean(Spine_pH), SE = sd(Spine_pH) / sqrt(n()), .groups = "drop")
+stats_table <- tibble(
+  Test = "Two-way ANOVA", Comparison = "Control MPC1KD vs TTX MPC1KD",
+  `Control mean (SE)` = sprintf("%.3f (%.3f)", means$mean[1], means$SE[1]),
+  `TTX mean (SE)` = sprintf("%.3f (%.3f)", means$mean[2], means$SE[2]),
+  `Condition p` = format_p(condition_p)
+)
+stats_table
+
+anova(fit_aov)
+```
+
+## Plot
+
+```{r figs2g-plot, fig.width=15, fig.height=20, out.width="75%"}
+set.seed(20261109)
+date_levels <- levels(spine_df$Date)
+date_colors <- c(
+  setNames(rep(c("#999999", "#E0E0E0", "#C8C8C8"), length.out = length(date_levels)),
+           paste("Control MPC1KD", date_levels, sep = "_")),
+  setNames(rep(c("#000000", "#606060", "#303030"), length.out = length(date_levels)),
+           paste("TTX MPC1KD", date_levels, sep = "_"))
+)
+stars <- case_when(condition_p < 0.001 ~ "***", condition_p < 0.01 ~ "**",
+                   condition_p < 0.05 ~ "*", TRUE ~ "ns")
+plot_stats <- tibble(x1 = 1, x2 = 2.2, y = 7.62, stars = stars) %>% filter(stars != "ns")
+
+figs2g_plot <- ggplot(spine_df, aes(x_pos, Spine_pH, color = Date_Condition)) +
+  geom_boxplot(aes(group = x_pos), fill = NA, width = 1, outlier.shape = NA,
+               linewidth = 2, color = "black") +
+  ggbeeswarm::geom_beeswarm(cex = 3, priority = "random", size = 10, corral = "random") +
+  stat_summary(aes(group = x_pos), fun = mean, geom = "point",
+               shape = 15, size = 20, color = "black") +
+  geom_segment(data = plot_stats, aes(x = x1, xend = x2, y = y, yend = y),
+               inherit.aes = FALSE, linewidth = 2, color = "black") +
+  geom_text(data = plot_stats, aes(x = (x1 + x2) / 2, y = y + 0.05, label = stars),
+            inherit.aes = FALSE, size = 25, color = "black") +
+  scale_x_continuous(breaks = unname(spacing_map),
+                     labels = c("control", "homeostatic\nplasticity")) +
+  scale_y_continuous(oob = scales::oob_keep, breaks = c(6, 6.5, 7, 7.5),
+                     limits = c(5.6, 7.8), expand = c(0, 0)) +
+  scale_color_manual(values = date_colors) +
+  labs(x = NULL, y = "pH<sub>spine</sub>") +
+  theme_classic() +
+  theme(axis.title.y = ggtext::element_markdown(size = 80, color = "black"),
+        axis.text = element_text(size = 80, color = "black"),
+        axis.ticks = element_line(linewidth = 5, color = "black"),
+        axis.ticks.length = grid::unit(0.5, "cm"),
+        axis.line = element_line(linewidth = 2, color = "black"),
+        legend.position = "none")
+figs2g_plot
+```
+
+```{r figs2g-save, include=FALSE}
+dir.create("./Graphs", recursive = TRUE, showWarnings = FALSE)
+ggsave("./Graphs/Fig S2G.png", figs2g_plot, width = 15, height = 20, units = "in", dpi = 300)
+tibble(Figure = "Fig S2G", File = "./Graphs/Fig S2G.png")
+```
+
+# Fig S2H
+
+Regional mitochondrial pH time courses used to correct the ATP traces in Fig 2K.
+
+**update for 2026 pending** — The source contains regional means and SEs. Individual pH traces and replicate IDs are unavailable.
+
+**Source data**  
+`Fig S2H.csv`, `Fig S2H uninduced.csv`
+
+**Columns**
+
+- `Time` — Time relative to induction (min)
+- `Juxta` — Mean juxtaspinal mitochondrial pH
+- `Juxta_SE` — SE of the corresponding mean pH
+- `NonJuxta` — Mean non-juxtaspinal mitochondrial pH
+- `NonJuxta_SE` — SE of the corresponding mean pH
+- `Unstim` — Mean mitochondrial pH near uninduced spines
+- `Unstim_SE` — SE of the corresponding mean pH
+
+## Data
+
+Regional means and SEs are aligned by time. The uninduced-spine trace comes from the Figure 2K pH correction data.
+
+```{r figs2h-data}
+suppressPackageStartupMessages({
+  library(dplyr); library(readr); library(ggplot2)
+})
+
+N_BASELINE_POINTS <- 9
+region_order <- c("Juxta", "NonJuxta", "Unstim")
+region_colors <- c(Juxta = "#1A1A1A", NonJuxta = "#777B7E", Unstim = "#BDBDBD")
+X_BREAKS <- ERRORBAR_TIMES <- c(-2, 0, 2, 4, 6, 8, 10, 12)
+
+pH_wide <- read_csv("./Fig S2H.csv", show_col_types = FALSE) %>%
+  left_join(read_csv("./Fig S2H uninduced.csv",show_col_types=FALSE),by="Time")
+required <- c("Time", "Juxta", "NonJuxta", "Juxta_SE", "NonJuxta_SE", "Unstim", "Unstim_SE")
+if (length(setdiff(required, names(pH_wide)))) stop("Fig S2H.csv is missing required columns.")
+
+pH_data <- bind_rows(
+  pH_wide %>% transmute(Time = as.numeric(Time), region = "Juxta",
+                         pH = as.numeric(Juxta), SE = as.numeric(Juxta_SE), time_order = row_number()),
+  pH_wide %>% transmute(Time = as.numeric(Time), region = "NonJuxta",
+                         pH = as.numeric(NonJuxta), SE = as.numeric(NonJuxta_SE), time_order = row_number()),
+  pH_wide %>% transmute(Time=as.numeric(Time),region="Unstim",pH=as.numeric(Unstim),
+                         SE=as.numeric(Unstim_SE),time_order=row_number())
+) %>%
+  filter(is.finite(Time), is.finite(pH)) %>%
+  mutate(region = factor(region, levels = region_order),
+         BaselinePoint = time_order <= N_BASELINE_POINTS) %>%
+  arrange(region, time_order)
+
+if (any(pH_data %>% filter(BaselinePoint) %>% count(region) %>% pull(n) != N_BASELINE_POINTS) ||
+    n_distinct(pH_data$region) != 3) stop("All three regions need nine baseline measurements.")
+
+pH_data %>% select(Time, region, pH, SE) %>%
+  mutate(across(where(is.numeric), ~ round(.x, 3)))
+```
+
+## Summary
+
+```{r figs2h-summary}
+baseline_table <- pH_data %>%
+  filter(BaselinePoint) %>%
+  group_by(region) %>%
+  summarise(`Baseline mean pH` = round(mean(pH), 3), .groups = "drop")
+baseline_table
+summary_table <- pH_data %>% count(region,name="n_Timepoints")
+summary_table
+```
+
+## Statistics
+
+Mean ± SE.
+
+## Plot
+
+The red bar marks single-spine induction from 0 to 2 min.
+
+```{r figs2h-plot, fig.width=30, fig.height=20, out.width="100%"}
+set.seed(20261109)
+baseline_lines <- baseline_table %>%
+  transmute(region, baseline_value = `Baseline mean pH`)
+pH_errorbars <- pH_data %>%
+  filter(round(Time, 8) %in% round(ERRORBAR_TIMES, 8), is.finite(SE))
+
+data_min <- min(pH_data$pH - ifelse(is.finite(pH_data$SE), pH_data$SE, 0))
+data_max <- max(pH_data$pH + ifelse(is.finite(pH_data$SE), pH_data$SE, 0))
+data_range <- max(data_max - data_min, 0.05)
+y_limits <- c(data_min - 0.1 * data_range, data_max + 0.15 * data_range)
+
+figs2h_plot <- ggplot(pH_data, aes(Time, pH, color = region, group = region)) +
+  geom_hline(data = baseline_lines, aes(yintercept = baseline_value),
+             inherit.aes = FALSE, color = "grey50", linetype = "dashed", linewidth = 3) +
+  geom_line(linewidth = 5) +
+  geom_point(size = 20) +
+  geom_errorbar(data = pH_errorbars, aes(ymin = pH - SE, ymax = pH + SE),
+                width = 0.2, linewidth = 4) +
+  scale_color_manual(values = region_colors, breaks = region_order, labels = c("juxtaspinal","non-juxtaspinal","uninduced spine")) +
+  scale_x_continuous(breaks = X_BREAKS, expand = expansion(add = c(0.15, 0.15))) +
+  scale_y_continuous(oob = scales::oob_keep, limits = y_limits) +
+  labs(x = "time since plasticity induction (min)", y = "pH<sub>mito</sub>") +
+  annotate("segment",x=0,xend=2,y=y_limits[2] - 0.02 * diff(y_limits),yend=y_limits[2] - 0.02 * diff(y_limits),color="#D00000",linewidth=6) +
+  theme_classic() +
+  theme(
+    axis.title.x = element_text(size = 80, color = "black"),
+    axis.title.y = ggtext::element_markdown(size = 80, color = "black"),
+    axis.text = element_text(size = 80, color = "black"),
+    axis.ticks = element_line(linewidth = 4, color = "black"),
+    axis.ticks.length = grid::unit(0.4, "cm"),
+    axis.line = element_line(linewidth = 2, color = "black"),
+    legend.position = "bottom", legend.text = element_text(size=30), legend.title = element_blank()
+  )
+figs2h_plot
+```
+
+```{r figs2h-save, include=FALSE}
+dir.create("./Graphs", recursive = TRUE, showWarnings = FALSE)
+ggsave("./Graphs/Fig S2H.png", figs2h_plot, width = 30, height = 20,
+       units = "in", dpi = 300, bg = "white")
+tibble(Figure = "Fig S2H", File = "./Graphs/Fig S2H.png")
+```

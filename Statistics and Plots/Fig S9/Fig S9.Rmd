@@ -1,0 +1,1094 @@
+---
+title: "Figure S9: DNA-PAINT validation and quantification"
+knit: (function(inputFile, encoding) { inputFile <- normalizePath(inputFile); oldwd <- setwd(dirname(inputFile)); on.exit(setwd(oldwd)); rmarkdown::render(basename(inputFile), encoding = encoding, output_file = "Fig S9.html", knit_root_dir = getwd()) })
+output:
+  html_document:
+    theme: darkly
+    highlight: breezedark
+    df_print: paged
+    toc: true
+    toc_depth: 1
+    toc_float: true
+    code_folding: hide
+    self_contained: true
+    mathjax: null
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE, message = FALSE, warning = FALSE,
+  fig.width = 30, fig.height = 20, fig.retina = 1,
+  out.width = "100%", fig.align = "center"
+)
+
+set.seed(20261109)
+options(width = 120, dplyr.summarise.inform = FALSE)
+options(contrasts = c("contr.treatment", "contr.poly"))
+
+```
+
+# Fig S9A
+
+Cumulative detected MIC60 copies over DNA-PAINT acquisition frames.
+
+**Source data**  
+`Fig S9A, B.csv`
+
+**Columns**
+
+- `Date` — Experiment date
+- `Condition` — Control or TTX
+- `Dish` — Culture dish ID
+- `Cell` — Cell ID
+- `frame_bin` — Acquisition frame range
+- `Mic60` — MIC60 copies detected in the frame bin
+
+## Data
+
+Copy counts are accumulated across frames within each cell.
+
+```{r fig-s9a-data}
+suppressPackageStartupMessages({
+  library(dplyr); library(readr); library(tidyr); library(ggplot2)
+})
+
+mic60_df <- read_csv("./Fig S9A, B.csv", show_col_types = FALSE) %>%
+  select(Date, Condition, Dish, Cell, frame_bin, Mic60) %>%
+  mutate(Condition = trimws(as.character(Condition)),
+         frame_bin = trimws(as.character(frame_bin)),
+         Mic60 = as.numeric(Mic60)) %>%
+  filter(Condition %in% c("Control", "TTX"), is.finite(Mic60)) %>%
+  extract(frame_bin, c("bin_start", "bin_end"), "^(\\d+)\\s*-\\s*(\\d+)$",
+          remove = FALSE, convert = TRUE)
+
+if (any(is.na(mic60_df$bin_start) | is.na(mic60_df$bin_end)))
+  stop("One or more frame_bin values could not be parsed.")
+if (any(count(mic60_df, Date, Condition, Dish, Cell, frame_bin)$n > 1))
+  stop("Duplicate rows were found for the same trace and frame bin.")
+
+mic60_df <- mic60_df %>%
+  mutate(Condition = factor(Condition, levels = c("Control", "TTX"))) %>%
+  group_by(Date, Condition, Dish, Cell) %>%
+  arrange(bin_start, .by_group = TRUE) %>%
+  mutate(Mic60_cumulative = cumsum(Mic60)) %>%
+  ungroup()
+
+mic60_df %>% select(Date, Condition, Dish, Cell, frame_bin, Mic60) %>%
+  mutate(Mic60 = round(Mic60, 3))
+```
+
+## Summary
+
+```{r fig-s9a-summary}
+summary_table <- mic60_df %>%
+  distinct(Date, Condition, Dish, Cell) %>%
+  group_by(Condition) %>%
+  summarise(n_Traces = n(), n_Experiment_Dates = n_distinct(Date), .groups = "drop")
+
+mic60_summary <- mic60_df %>%
+  group_by(Condition, frame_bin, bin_start, bin_end) %>%
+  summarise(mean = mean(Mic60_cumulative),
+            SEM = sd(Mic60_cumulative) / sqrt(n()),
+            n = n(), .groups = "drop") %>%
+  mutate(SEM = if_else(n > 1, SEM, 0), Frames = bin_end) %>%
+  arrange(Condition, bin_start)
+
+summary_table
+mic60_summary %>% select(Condition, Frames, mean, SEM) %>%
+  mutate(across(c(mean, SEM), ~ round(.x, 3)))
+```
+
+## Statistics
+
+Descriptive analysis.
+
+## Plot
+
+```{r fig-s9a-plot, fig.width=30, fig.height=15}
+set.seed(20261109)
+figs9a_plot <- ggplot(mic60_summary, aes(Frames, mean, color = Condition, group = Condition)) +
+  geom_errorbar(aes(ymin = mean - SEM, ymax = mean + SEM), width = 400, linewidth = 2) +
+  geom_line(linewidth = 3) +
+  geom_point(size = 10) +
+  scale_color_manual(labels=c(Control="control",TTX="homeostatic plasticity"), values = c(Control = "#777B7E", TTX = "#D871F5")) +
+  scale_x_continuous(oob = scales::oob_keep, breaks = c(12000, 24000, 36000, 48000, 60000),
+                     labels = scales::label_comma(),
+                     limits = c(0, 65000), expand = c(0, 0)) +
+  scale_y_continuous(oob = scales::oob_keep, breaks = c(0, 200, 400, 600),
+                     limits = c(0, 700), expand = c(0, 0),
+                     labels = scales::label_comma()) +
+  labs(x = "acquisition frames", y = "cumulative Mic60\ncopies") +
+  theme_classic() +
+  theme(axis.title = element_text(size = 80, color = "black"),
+        axis.text = element_text(size = 80, color = "black"),
+        axis.ticks = element_line(linewidth = 5, color = "black"),
+        axis.ticks.length = grid::unit(0.5, "cm"),
+        axis.line = element_line(linewidth = 2, color = "black"),
+        legend.position = "bottom", legend.text = element_text(size=30), legend.title = element_blank())
+figs9a_plot
+```
+
+```{r fig-s9a-save, include=FALSE}
+dir.create("./Graphs", recursive = TRUE, showWarnings = FALSE)
+ggsave("./Graphs/Fig S9A.png", figs9a_plot, width = 30, height = 15,
+       units = "in", dpi = 300)
+tibble(Figure = "Fig S9A", File = "./Graphs/Fig S9A.png")
+```
+
+# Fig S9B
+
+Cumulative detected ATP synthase copies over DNA-PAINT acquisition frames.
+
+**Source data**  
+`Fig S9A, B.csv`
+
+**Columns**
+
+- `Date` — Experiment date
+- `Condition` — Control or TTX
+- `Dish` — Culture dish ID
+- `Cell` — Cell ID
+- `frame_bin` — Acquisition frame range
+- `ATP_synthase` — ATP synthase copies detected in the frame bin
+
+## Data
+
+Copy counts are accumulated across frames within each cell.
+
+```{r fig-s9b-data}
+suppressPackageStartupMessages({
+  library(dplyr); library(readr); library(tidyr); library(ggplot2)
+})
+
+atp_df <- read_csv("./Fig S9A, B.csv", show_col_types = FALSE) %>%
+  select(Date, Condition, Dish, Cell, frame_bin, ATP_synthase) %>%
+  mutate(Condition = trimws(as.character(Condition)),
+         frame_bin = trimws(as.character(frame_bin)),
+         ATP_synthase = as.numeric(ATP_synthase)) %>%
+  filter(Condition %in% c("Control", "TTX"), is.finite(ATP_synthase)) %>%
+  extract(frame_bin, c("bin_start", "bin_end"), "^(\\d+)\\s*-\\s*(\\d+)$",
+          remove = FALSE, convert = TRUE)
+
+if (any(is.na(atp_df$bin_start) | is.na(atp_df$bin_end)))
+  stop("One or more frame_bin values could not be parsed.")
+if (any(count(atp_df, Date, Condition, Dish, Cell, frame_bin)$n > 1))
+  stop("Duplicate rows were found for the same trace and frame bin.")
+
+atp_df <- atp_df %>%
+  mutate(Condition = factor(Condition, levels = c("Control", "TTX"))) %>%
+  group_by(Date, Condition, Dish, Cell) %>%
+  arrange(bin_start, .by_group = TRUE) %>%
+  mutate(ATP_synthase_cumulative = cumsum(ATP_synthase)) %>%
+  ungroup()
+
+atp_df %>% select(Date, Condition, Dish, Cell, frame_bin, ATP_synthase) %>%
+  mutate(ATP_synthase = round(ATP_synthase, 3))
+```
+
+## Summary
+
+```{r fig-s9b-summary}
+summary_table <- atp_df %>%
+  distinct(Date, Condition, Dish, Cell) %>%
+  group_by(Condition) %>%
+  summarise(n_Traces = n(), n_Experiment_Dates = n_distinct(Date), .groups = "drop")
+
+atp_summary <- atp_df %>%
+  group_by(Condition, frame_bin, bin_start, bin_end) %>%
+  summarise(mean = mean(ATP_synthase_cumulative),
+            SEM = sd(ATP_synthase_cumulative) / sqrt(n()),
+            n = n(), .groups = "drop") %>%
+  mutate(SEM = if_else(n > 1, SEM, 0), Frames = bin_end) %>%
+  arrange(Condition, bin_start)
+
+summary_table
+atp_summary %>% select(Condition, Frames, mean, SEM) %>%
+  mutate(across(c(mean, SEM), ~ round(.x, 3)))
+```
+
+## Statistics
+
+Descriptive analysis.
+
+## Plot
+
+```{r fig-s9b-plot, fig.width=30, fig.height=15}
+set.seed(20261109)
+figs9b_plot <- ggplot(atp_summary, aes(Frames, mean, color = Condition, group = Condition)) +
+  geom_errorbar(aes(ymin = mean - SEM, ymax = mean + SEM), width = 400, linewidth = 2) +
+  geom_line(linewidth = 3) +
+  geom_point(size = 10) +
+  scale_color_manual(labels=c(Control="control",TTX="homeostatic plasticity"), values = c(Control = "#777B7E", TTX = "#42B3B2")) +
+  scale_x_continuous(oob = scales::oob_keep, breaks = c(12000, 24000, 36000, 48000, 60000),
+                     labels = scales::label_comma(),
+                     limits = c(0, 65000), expand = c(0, 0)) +
+  scale_y_continuous(oob = scales::oob_keep, breaks = c(0, 200, 400, 600, 800),
+                     limits = c(0, 950), expand = c(0, 0),
+                     labels = scales::label_comma()) +
+  labs(x = "acquisition frames", y = "cumulative ATP\nsynthase copies") +
+  theme_classic() +
+  theme(axis.title = element_text(size = 80, color = "black"),
+        axis.text = element_text(size = 80, color = "black"),
+        axis.ticks = element_line(linewidth = 5, color = "black"),
+        axis.ticks.length = grid::unit(0.5, "cm"),
+        axis.line = element_line(linewidth = 2, color = "black"),
+        legend.position = "bottom", legend.text = element_text(size=30), legend.title = element_blank())
+figs9b_plot
+```
+
+```{r fig-s9b-save, include=FALSE}
+dir.create("./Graphs", recursive = TRUE, showWarnings = FALSE)
+ggsave("./Graphs/Fig S9B.png", figs9b_plot, width = 30, height = 15,
+       units = "in", dpi = 300)
+tibble(Figure = "Fig S9B", File = "./Graphs/Fig S9B.png")
+```
+
+# Fig S9C
+
+MIC60 localization precision estimated by nearest-neighbor analysis (NeNA).
+
+**Source data**  
+`Fig S9C, D.csv`
+
+**Columns**
+
+- `Date` — Experiment date
+- `Condition` — Control or TTX
+- `Dish` — Culture dish ID
+- `Cell` — Cell ID
+- `Probe` — DNA-PAINT probe (probe00, ATP synthase; probe01, MIC60)
+- `NeNA_nm` — Nearest-neighbor localization precision (nm)
+
+## Data
+
+```{r fig-s9c-data}
+suppressPackageStartupMessages({
+  library(dplyr); library(readr); library(ggplot2); library(ggbeeswarm)
+})
+
+spacing_map <- c(Control = 1, TTX = 2.2)
+
+nena_mic60 <- read_csv("./Fig S9C, D.csv", show_col_types = FALSE) %>%
+  transmute(
+    Date = trimws(as.character(Date)),
+    Condition = trimws(as.character(Condition)),
+    Dish = as.integer(parse_number(as.character(Dish))),
+    Cell = as.integer(parse_number(as.character(Cell))),
+    Probe = case_when(
+      tolower(trimws(Probe)) == "probe00" ~ "ATP synthase",
+      tolower(trimws(Probe)) == "probe01" ~ "Mic60",
+      TRUE ~ trimws(Probe)
+    ),
+    NeNA_nm = as.numeric(NeNA_nm)
+  ) %>%
+  filter(Probe == "Mic60", Condition %in% names(spacing_map),
+         Date != "", is.finite(NeNA_nm)) %>%
+  mutate(
+    Condition = factor(Condition, levels = names(spacing_map)),
+    Date = factor(Date),
+    x_pos = unname(spacing_map[as.character(Condition)]),
+    Condition_Date = paste(Condition, Date, sep = "_")
+  )
+
+if (nrow(nena_mic60) == 0) stop("No valid Mic60 measurements remain.")
+
+nena_mic60 %>%
+  select(Date, Condition, Dish, Cell, Probe, NeNA_nm) %>%
+  mutate(NeNA_nm = round(NeNA_nm, 3))
+```
+
+## Summary
+
+```{r fig-s9c-summary}
+summary_table <- nena_mic60 %>%
+  group_by(Condition) %>%
+  summarise(
+    n_Measurements = n(),
+    n_Cells = n_distinct(Date, Dish, Cell),
+    n_Experiment_Dates = n_distinct(Date),
+    `Mean (SE)` = sprintf("%.3f (%.3f)", mean(NeNA_nm),
+                          sd(NeNA_nm) / sqrt(n())),
+    .groups = "drop"
+  )
+
+summary_table
+```
+
+## Statistics
+
+Descriptive analysis.
+
+## Plot
+
+```{r fig-s9c-plot, fig.width=15, fig.height=20}
+set.seed(20261109)
+date_levels <- levels(nena_mic60$Date)
+date_colors <- c(
+  setNames(
+    rep(c("#1A1A1A", "#4D4D4D", "#777B7E"), length.out = length(date_levels)),
+    paste("Control", date_levels, sep = "_")
+  ),
+  setNames(
+    rep(c("#A949D5", "#7A20B5", "#D871F5"), length.out = length(date_levels)),
+    paste("TTX", date_levels, sep = "_")
+  )
+)
+
+figs9c_plot <- ggplot(nena_mic60, aes(x_pos, NeNA_nm, color = Condition_Date)) +
+  ggbeeswarm::geom_beeswarm(
+    cex = 7, priority = "random", size = 12, corral = "random"
+  ) +
+  geom_boxplot(
+    aes(group = x_pos), fill = NA, width = 1, linewidth = 2,
+    outlier.shape = NA, color = "black"
+  ) +
+  stat_summary(
+    aes(group = x_pos), fun = mean, geom = "point",
+    shape = 15, size = 20, color = "black"
+  ) +
+  scale_x_continuous(
+    breaks = unname(spacing_map),
+    labels = c("control", "homeostatic\nplasticity")
+  ) +
+  scale_y_continuous(oob = scales::oob_keep, 
+    breaks = c(14, 18, 22, 26),
+    limits = c(14, 28),
+    expand = c(0, 0)
+  ) +
+  scale_color_manual(values = date_colors) +
+  labs(x = NULL, y = "MIC60 NeNA (nm)") +
+  theme_classic() +
+  theme(
+    axis.title = element_text(size = 80, color = "black"),
+    axis.text = element_text(size = 80, color = "black"),
+    axis.ticks = element_line(linewidth = 5, color = "black"),
+    axis.ticks.length = grid::unit(0.5, "cm"),
+    axis.line = element_line(linewidth = 2, color = "black"),
+    legend.position = "none"
+  )
+
+figs9c_plot
+```
+
+```{r fig-s9c-save, include=FALSE}
+dir.create("./Graphs", recursive = TRUE, showWarnings = FALSE)
+
+ggsave(
+  "./Graphs/Fig S9C.png", figs9c_plot,
+  width = 15, height = 20, units = "in", dpi = 300
+)
+
+tibble(Figure = "Fig S9C", File = "./Graphs/Fig S9C.png")
+```
+
+# Fig S9D
+
+ATP synthase localization precision estimated by nearest-neighbor analysis (NeNA).
+
+**Source data**  
+`Fig S9C, D.csv`
+
+**Columns**
+
+- `Date` — Experiment date
+- `Condition` — Control or TTX
+- `Dish` — Culture dish ID
+- `Cell` — Cell ID
+- `Probe` — DNA-PAINT probe (probe00, ATP synthase; probe01, MIC60)
+- `NeNA_nm` — Nearest-neighbor localization precision (nm)
+
+## Data
+
+```{r fig-s9d-data}
+suppressPackageStartupMessages({
+  library(dplyr); library(readr); library(ggplot2); library(ggbeeswarm)
+})
+
+spacing_map <- c(Control = 1, TTX = 2.2)
+
+nena_atp <- read_csv("./Fig S9C, D.csv", show_col_types = FALSE) %>%
+  transmute(
+    Date = trimws(as.character(Date)),
+    Condition = trimws(as.character(Condition)),
+    Dish = as.integer(parse_number(as.character(Dish))),
+    Cell = as.integer(parse_number(as.character(Cell))),
+    Probe = case_when(
+      tolower(trimws(Probe)) == "probe00" ~ "ATP synthase",
+      tolower(trimws(Probe)) == "probe01" ~ "Mic60",
+      TRUE ~ trimws(Probe)
+    ),
+    NeNA_nm = as.numeric(NeNA_nm)
+  ) %>%
+  filter(Probe == "ATP synthase", Condition %in% names(spacing_map),
+         Date != "", is.finite(NeNA_nm)) %>%
+  mutate(
+    Condition = factor(Condition, levels = names(spacing_map)),
+    Date = factor(Date),
+    x_pos = unname(spacing_map[as.character(Condition)]),
+    Condition_Date = paste(Condition, Date, sep = "_")
+  )
+
+if (nrow(nena_atp) == 0) stop("No valid ATP synthase measurements remain.")
+
+nena_atp %>%
+  select(Date, Condition, Dish, Cell, Probe, NeNA_nm) %>%
+  mutate(NeNA_nm = round(NeNA_nm, 3))
+```
+
+## Summary
+
+```{r fig-s9d-summary}
+summary_table <- nena_atp %>%
+  group_by(Condition) %>%
+  summarise(
+    n_Measurements = n(),
+    n_Cells = n_distinct(Date, Dish, Cell),
+    n_Experiment_Dates = n_distinct(Date),
+    `Mean (SE)` = sprintf("%.3f (%.3f)", mean(NeNA_nm),
+                          sd(NeNA_nm) / sqrt(n())),
+    .groups = "drop"
+  )
+
+summary_table
+```
+
+## Statistics
+
+Descriptive analysis.
+
+## Plot
+
+```{r fig-s9d-plot, fig.width=15, fig.height=20}
+set.seed(20261109)
+date_levels <- levels(nena_atp$Date)
+date_colors <- c(
+  setNames(
+    rep(c("#1A1A1A", "#4D4D4D", "#777B7E"), length.out = length(date_levels)),
+    paste("Control", date_levels, sep = "_")
+  ),
+  setNames(
+    rep(c("#168C8B", "#42B3B2", "#70D6D4"), length.out = length(date_levels)),
+    paste("TTX", date_levels, sep = "_")
+  )
+)
+
+figs9d_plot <- ggplot(nena_atp, aes(x_pos, NeNA_nm, color = Condition_Date)) +
+  ggbeeswarm::geom_beeswarm(
+    cex = 7, priority = "random", size = 12, corral = "random"
+  ) +
+  geom_boxplot(
+    aes(group = x_pos), fill = NA, width = 1, linewidth = 2,
+    outlier.shape = NA, color = "black"
+  ) +
+  stat_summary(
+    aes(group = x_pos), fun = mean, geom = "point",
+    shape = 15, size = 20, color = "black"
+  ) +
+  scale_x_continuous(
+    breaks = unname(spacing_map),
+    labels = c("control", "homeostatic\nplasticity")
+  ) +
+  scale_y_continuous(oob = scales::oob_keep, 
+    breaks = c(10, 12, 14, 16),
+    limits = c(10, 17),
+    expand = c(0, 0)
+  ) +
+  scale_color_manual(values = date_colors) +
+  labs(x = NULL, y = "ATP synthase\nNeNA (nm)") +
+  theme_classic() +
+  theme(
+    axis.title = element_text(size = 80, color = "black"),
+    axis.text = element_text(size = 80, color = "black"),
+    axis.ticks = element_line(linewidth = 5, color = "black"),
+    axis.ticks.length = grid::unit(0.5, "cm"),
+    axis.line = element_line(linewidth = 2, color = "black"),
+    legend.position = "none"
+  )
+
+figs9d_plot
+```
+
+```{r fig-s9d-save, include=FALSE}
+dir.create("./Graphs", recursive = TRUE, showWarnings = FALSE)
+
+ggsave(
+  "./Graphs/Fig S9D.png", figs9d_plot,
+  width = 15, height = 20, units = "in", dpi = 300
+)
+
+tibble(Figure = "Fig S9D", File = "./Graphs/Fig S9D.png")
+```
+
+# Fig S9E
+
+Distribution of DNA-PAINT localizations per detected MIC60 copy.
+
+**Source data**  
+`Fig S9E, F.csv`
+
+**Columns**
+
+- `Date` — Experiment date
+- `Condition` — Control or TTX
+- `Dish` — Culture dish ID
+- `Cell` — Cell ID
+- `cluster_id` — DNA-PAINT cluster ID
+- `Mic60_locs` — Localizations per MIC60 cluster
+
+## Data
+
+The histogram shows 1–100 localizations per cluster.
+
+```{r fig-s9e-data}
+suppressPackageStartupMessages({
+  library(dplyr); library(readr); library(tidyr); library(ggplot2)
+})
+
+X_LIMITS <- c(8, 102); X_BREAKS <- seq(10, 100, 10)
+Y_LIMITS <- c(0, 700); Y_BREAKS <- c(0, 150, 300, 450, 600)
+
+mic60_locs <- read_csv("./Fig S9E, F.csv", show_col_types = FALSE) %>%
+  transmute(Date = trimws(as.character(Date)),
+            Condition = trimws(as.character(Condition)),
+            Dish = as.integer(parse_number(as.character(Dish))),
+            Cell = as.integer(parse_number(as.character(Cell))),
+            cluster_id, localizations = as.numeric(Mic60_locs)) %>%
+  filter(Condition %in% c("Control", "TTX"), Date != "",
+         is.finite(localizations), localizations > 0) %>%
+  mutate(Condition = factor(Condition, levels = c("Control", "TTX")))
+
+if (any(mic60_locs$localizations < 0))
+  stop("Negative Mic60 localization counts were found.")
+if (any(abs(mic60_locs$localizations - round(mic60_locs$localizations)) > 1e-6))
+  stop("Non-integer Mic60 localization counts were found.")
+
+mic60_locs <- mic60_locs %>% mutate(localizations = round(localizations))
+
+mic60_locs %>%
+  transmute(Date, Condition, Dish, Cell, cluster_id,
+            Mic60_locs = localizations)
+```
+
+## Summary
+
+```{r fig-s9e-summary}
+summary_table <- mic60_locs %>%
+  group_by(Condition) %>%
+  summarise(
+    n_Clusters = n(),
+    n_Cells = n_distinct(Date, Dish, Cell),
+    n_Experiment_Dates = n_distinct(Date),
+    `Mean (SE)` = sprintf("%.3f (%.3f)", mean(localizations),
+                          sd(localizations) / sqrt(n())),
+    `Clusters from 1-100` = sum(localizations <= 100),
+    `Clusters above 100` = sum(localizations > 100),
+    .groups = "drop"
+  )
+
+combined_summary <- mic60_locs %>%
+  summarise(
+    Probe = "Mic60",
+    `Combined mean (SE)` = sprintf("%.3f (%.3f)", mean(localizations),
+                                    sd(localizations) / sqrt(n()))
+  )
+
+summary_table
+combined_summary
+```
+
+## Statistics
+
+Descriptive analysis.
+
+## Plot
+
+```{r fig-s9e-plot, fig.width=30, fig.height=15}
+set.seed(20261109)
+mic60_histogram <- mic60_locs %>%
+  filter(localizations <= 100) %>%
+  count(Condition, localizations, name = "n") %>%
+  complete(Condition, localizations = 1:100, fill = list(n = 0)) %>%
+  mutate(x_pos = if_else(Condition == "Control",
+                         localizations - 0.25, localizations + 0.25))
+
+figs9e_plot <- ggplot(mic60_histogram, aes(x_pos, n, fill = Condition, color = Condition)) +
+  geom_col(width = 0.5, linewidth = 0.6) +
+  scale_fill_manual(values = c(Control = "#777B7E", TTX = "#D871F5")) +
+  scale_color_manual(values = c(Control = "#777B7E", TTX = "#D871F5")) +
+  scale_x_continuous(oob = scales::oob_keep, breaks = X_BREAKS, limits = X_LIMITS, expand = c(0, 0)) +
+  scale_y_continuous(oob = scales::oob_keep, breaks = Y_BREAKS, limits = Y_LIMITS, expand = c(0, 0)) +
+  labs(x = "localizations per molecule", y = "no. of MIC60 copies") +
+  theme_classic() +
+  theme(
+    axis.title = element_text(size = 80, color = "black"),
+    axis.text.x = element_text(size = 65, color = "black"),
+    axis.text.y = element_text(size = 80, color = "black"),
+    axis.ticks = element_line(linewidth = 5, color = "black"),
+    axis.ticks.length = grid::unit(0.5, "cm"),
+    axis.line = element_line(linewidth = 2, color = "black"),
+    legend.position = "bottom", legend.text = element_text(size=30), legend.title = element_blank()
+  )
+
+figs9e_plot
+```
+
+```{r fig-s9e-save, include=FALSE}
+dir.create("./Graphs", recursive = TRUE, showWarnings = FALSE)
+
+ggsave(
+  "./Graphs/Fig S9E.png", figs9e_plot,
+  width = 30, height = 15, units = "in", dpi = 300
+)
+
+tibble(Figure = "Fig S9E", File = "./Graphs/Fig S9E.png")
+```
+
+# Fig S9F
+
+Distribution of DNA-PAINT localizations per detected ATP synthase copy.
+
+**Source data**  
+`Fig S9E, F.csv`
+
+**Columns**
+
+- `Date` — Experiment date
+- `Condition` — Control or TTX
+- `Dish` — Culture dish ID
+- `Cell` — Cell ID
+- `cluster_id` — DNA-PAINT cluster ID
+- `ATP_synthase_locs` — Localizations per ATP synthase cluster
+
+## Data
+
+The histogram shows 1–100 localizations per cluster.
+
+```{r fig-s9f-data}
+suppressPackageStartupMessages({
+  library(dplyr); library(readr); library(tidyr); library(ggplot2)
+})
+
+X_LIMITS <- c(8, 102); X_BREAKS <- seq(10, 100, 10)
+Y_LIMITS <- c(0, 700); Y_BREAKS <- c(0, 150, 300, 450, 600)
+
+atp_locs <- read_csv("./Fig S9E, F.csv", show_col_types = FALSE) %>%
+  transmute(Date = trimws(as.character(Date)),
+            Condition = trimws(as.character(Condition)),
+            Dish = as.integer(parse_number(as.character(Dish))),
+            Cell = as.integer(parse_number(as.character(Cell))),
+            cluster_id, localizations = as.numeric(ATP_synthase_locs)) %>%
+  filter(Condition %in% c("Control", "TTX"), Date != "",
+         is.finite(localizations), localizations > 0) %>%
+  mutate(Condition = factor(Condition, levels = c("Control", "TTX")))
+
+if (any(atp_locs$localizations < 0))
+  stop("Negative ATP synthase localization counts were found.")
+if (any(abs(atp_locs$localizations - round(atp_locs$localizations)) > 1e-6))
+  stop("Non-integer ATP synthase localization counts were found.")
+
+atp_locs <- atp_locs %>% mutate(localizations = round(localizations))
+
+atp_locs %>%
+  transmute(Date, Condition, Dish, Cell, cluster_id,
+            ATP_synthase_locs = localizations)
+```
+
+## Summary
+
+```{r fig-s9f-summary}
+summary_table <- atp_locs %>%
+  group_by(Condition) %>%
+  summarise(
+    n_Clusters = n(),
+    n_Cells = n_distinct(Date, Dish, Cell),
+    n_Experiment_Dates = n_distinct(Date),
+    `Mean (SE)` = sprintf("%.3f (%.3f)", mean(localizations),
+                          sd(localizations) / sqrt(n())),
+    `Clusters from 1-100` = sum(localizations <= 100),
+    `Clusters above 100` = sum(localizations > 100),
+    .groups = "drop"
+  )
+
+combined_summary <- atp_locs %>%
+  summarise(
+    Probe = "ATP synthase",
+    `Combined mean (SE)` = sprintf("%.3f (%.3f)", mean(localizations),
+                                    sd(localizations) / sqrt(n()))
+  )
+
+summary_table
+combined_summary
+```
+
+## Statistics
+
+Descriptive analysis.
+
+## Plot
+
+```{r fig-s9f-plot, fig.width=30, fig.height=15}
+set.seed(20261109)
+atp_histogram <- atp_locs %>%
+  filter(localizations <= 100) %>%
+  count(Condition, localizations, name = "n") %>%
+  complete(Condition, localizations = 1:100, fill = list(n = 0)) %>%
+  mutate(x_pos = if_else(Condition == "Control",
+                         localizations - 0.25, localizations + 0.25))
+
+figs9f_plot <- ggplot(atp_histogram, aes(x_pos, n, fill = Condition, color = Condition)) +
+  geom_col(width = 0.5, linewidth = 0.6) +
+  scale_fill_manual(values = c(Control = "#777B7E", TTX = "#42B3B2")) +
+  scale_color_manual(values = c(Control = "#777B7E", TTX = "#42B3B2")) +
+  scale_x_continuous(oob = scales::oob_keep, breaks = X_BREAKS, limits = X_LIMITS, expand = c(0, 0)) +
+  scale_y_continuous(oob = scales::oob_keep, breaks = Y_BREAKS, limits = Y_LIMITS, expand = c(0, 0)) +
+  labs(x = "localizations per molecule", y = "no. of ATP\nsynthase copies") +
+  theme_classic() +
+  theme(
+    axis.title = element_text(size = 80, color = "black"),
+    axis.text.x = element_text(size = 65, color = "black"),
+    axis.text.y = element_text(size = 80, color = "black"),
+    axis.ticks = element_line(linewidth = 5, color = "black"),
+    axis.ticks.length = grid::unit(0.5, "cm"),
+    axis.line = element_line(linewidth = 2, color = "black"),
+    legend.position = "bottom", legend.text = element_text(size=30), legend.title = element_blank()
+  )
+
+figs9f_plot
+```
+
+```{r fig-s9f-save, include=FALSE}
+dir.create("./Graphs", recursive = TRUE, showWarnings = FALSE)
+
+ggsave(
+  "./Graphs/Fig S9F.png", figs9f_plot,
+  width = 30, height = 15, units = "in", dpi = 300
+)
+
+tibble(Figure = "Fig S9F", File = "./Graphs/Fig S9F.png")
+```
+
+# Fig S9G
+
+MIC60 copy density per whole-mitochondrion area following homeostatic plasticity.
+
+**update for 2026 pending** — The source contains 150 control and 166 treated mitochondria. The v3 legend reports 149 and 165 and describes copies per mitochondrion. The plot uses copies per µm².
+
+**Source data**  
+`Fig S9G, H.csv`
+
+**Columns**
+
+- `Date` — Experiment date
+- `Condition` — Control or TTX
+- `Dish` — Culture dish ID
+- `Cell` — Cell ID
+- `dendrite` — Dendrite ID
+- `mito` — Mitochondrion ID
+- `mito_area_um2` — Mitochondrial area (µm²)
+- `probe01` — MIC60 copy count
+
+## Data
+
+MIC60 copy density is the copy count divided by mitochondrial area.
+
+```{r fig-s9g-data}
+suppressPackageStartupMessages({
+  library(dplyr); library(readr); library(ggplot2)
+  library(ggbeeswarm); library(ggtext)
+})
+
+spacing_map <- c(Control = 1, TTX = 2.2)
+
+mic60_mito <- read_csv("./Fig S9G, H.csv", show_col_types = FALSE) %>%
+  transmute(
+    Date = trimws(as.character(Date)),
+    Condition = trimws(as.character(Condition)),
+    Dish = as.integer(parse_number(as.character(Dish))),
+    Cell = as.integer(parse_number(as.character(Cell))),
+    dendrite = as.integer(dendrite),
+    mito = as.integer(mito),
+    mito_area_um2 = as.numeric(mito_area_um2),
+    MIC60_copies = as.numeric(probe01)
+  ) %>%
+  filter(
+    Condition %in% names(spacing_map), Date != "",
+    is.finite(mito_area_um2), mito_area_um2 > 0,
+    
+    is.finite(MIC60_copies)
+  ) %>%
+  mutate(
+    MIC60_copies_per_mito_um2 = MIC60_copies / mito_area_um2,
+    Condition = factor(Condition, levels = names(spacing_map)),
+    Date = factor(Date),
+    x_pos = unname(spacing_map[as.character(Condition)]),
+    Condition_Date = paste(Condition, Date, sep = "_")
+  )
+
+if (nrow(mic60_mito) == 0) stop("No valid MIC60 measurements remain.")
+
+mic60_mito %>%
+  select(Date, Condition, Dish, Cell, dendrite, mito, mito_area_um2,
+         MIC60_copies, MIC60_copies_per_mito_um2) %>%
+  mutate(across(where(is.numeric), ~ round(.x, 3)))
+```
+
+## Summary
+
+```{r fig-s9g-summary}
+summary_table <- mic60_mito %>%
+  group_by(Condition) %>%
+  summarise(
+    n_Mitochondria = n_distinct(Date, Dish, Cell, dendrite, mito),
+    n_Dendrites = n_distinct(Date, Dish, Cell, dendrite),
+    n_Cells = n_distinct(Date, Dish, Cell),
+    n_Experiment_Dates = n_distinct(Date),
+    `Mean (SE)` = sprintf(
+      "%.3f (%.3f)",
+      mean(MIC60_copies_per_mito_um2),
+      sd(MIC60_copies_per_mito_um2) / sqrt(n())
+    ),
+    .groups = "drop"
+  )
+
+summary_table
+```
+
+## Statistics
+
+Two-way ANOVA with condition and experiment date (Type I sums of squares), followed by Tukey HSD.
+
+```{r fig-s9g-statistics}
+fit_aov <- aov(MIC60_copies_per_mito_um2 ~ Condition * Date, data = mic60_mito)
+condition_p <- as.numeric(anova(fit_aov)["Condition", "Pr(>F)"])
+posthoc_p <- as.numeric(TukeyHSD(fit_aov, "Condition")$Condition[1, "p adj"])
+format_p <- function(p) ifelse(p < 0.0001, "<0.0001", sprintf("%.4f", p))
+
+stats_table <- tibble(
+  Test = "Two-way ANOVA with Tukey HSD",
+  Comparison = "Control vs TTX",
+  `Control mean (SE)` = summary_table$`Mean (SE)`[summary_table$Condition == "Control"],
+  `TTX mean (SE)` = summary_table$`Mean (SE)`[summary_table$Condition == "TTX"],
+  `Condition p` = format_p(condition_p),
+  `Tukey p` = format_p(posthoc_p)
+)
+
+stats_table
+
+anova(fit_aov)
+```
+
+## Plot
+
+```{r fig-s9g-plot, fig.width=15, fig.height=20}
+set.seed(20261109)
+date_levels <- levels(mic60_mito$Date)
+date_colors <- c(
+  setNames(rep(c("#1A1A1A", "#4D4D4D", "#777B7E"), length.out = length(date_levels)), paste("Control", date_levels, sep = "_")),
+  setNames(rep(c("#A949D5", "#7A20B5", "#D871F5"), length.out = length(date_levels)), paste("TTX", date_levels, sep = "_"))
+)
+
+stars <- case_when(posthoc_p < 0.001 ~ "***", posthoc_p < 0.01 ~ "**",
+                   posthoc_p < 0.05 ~ "*", TRUE ~ "ns")
+plot_stats <- tibble(x1 = 1, x2 = 2.2, y = 67, stars) %>%
+  filter(stars != "ns")
+
+figs9g_plot <- ggplot(mic60_mito, aes(x_pos, MIC60_copies_per_mito_um2, color = Condition_Date)) +
+  ggbeeswarm::geom_beeswarm(cex = 3, priority = "random", size = 12, corral = "random") +
+  geom_boxplot(aes(group = x_pos), fill = NA, width = 1, linewidth = 2,
+               outlier.shape = NA, color = "black") +
+  stat_summary(aes(group = x_pos), fun = mean, geom = "point",
+               shape = 15, size = 20, color = "black") +
+  geom_segment(data = plot_stats, aes(x = x1, xend = x2, y = y, yend = y),
+               inherit.aes = FALSE, linewidth = 2, color = "black") +
+  geom_text(data = plot_stats, aes(x = (x1 + x2) / 2, y = y + 2, label = stars),
+            inherit.aes = FALSE, size = 25, color = "black") +
+  scale_x_continuous(breaks = unname(spacing_map),
+                     labels = c("control", "homeostatic\nplasticity")) +
+  scale_y_continuous(expand = expansion(mult = c(0.05, 0.15))) +
+  scale_color_manual(values = date_colors) +
+  labs(x = NULL, y = "MIC60 copies<br>per mito (&micro;m<sup>2</sup>)") +
+  theme_classic() +
+  theme(axis.title.x = element_text(size = 80, color = "black"),
+        axis.title.y = ggtext::element_markdown(size = 80, color = "black"),
+        axis.text = element_text(size = 80, color = "black"),
+        axis.ticks = element_line(linewidth = 5, color = "black"),
+        axis.ticks.length = grid::unit(0.5, "cm"),
+        axis.line = element_line(linewidth = 2, color = "black"),
+        legend.position = "none")
+
+figs9g_plot
+```
+
+```{r fig-s9g-save, include=FALSE}
+dir.create("./Graphs", recursive = TRUE, showWarnings = FALSE)
+
+ggsave(
+  "./Graphs/Fig S9G.png", figs9g_plot,
+  width = 15, height = 20, units = "in", dpi = 300
+)
+
+tibble(Figure = "Fig S9G", File = "./Graphs/Fig S9G.png")
+```
+
+# Fig S9H
+
+ATP synthase copy density per whole-mitochondrion area following homeostatic plasticity.
+
+**update for 2026 pending** — The source contains 150 control and 166 treated mitochondria. The v3 legend reports 149 and 165 and describes copies per mitochondrion. The plot uses copies per µm².
+
+**Source data**  
+`Fig S9G, H.csv`
+
+**Columns**
+
+- `Date` — Experiment date
+- `Condition` — Control or TTX
+- `Dish` — Culture dish ID
+- `Cell` — Cell ID
+- `dendrite` — Dendrite ID
+- `mito` — Mitochondrion ID
+- `mito_area_um2` — Mitochondrial area (µm²)
+- `probe00` — ATP synthase copy count
+
+## Data
+
+ATP synthase copy density is the copy count divided by mitochondrial area.
+
+```{r fig-s9h-data}
+suppressPackageStartupMessages({
+  library(dplyr); library(readr); library(ggplot2)
+  library(ggbeeswarm); library(ggtext)
+})
+
+spacing_map <- c(Control = 1, TTX = 2.2)
+
+atp_mito <- read_csv("./Fig S9G, H.csv", show_col_types = FALSE) %>%
+  transmute(
+    Date = trimws(as.character(Date)),
+    Condition = trimws(as.character(Condition)),
+    Dish = as.integer(parse_number(as.character(Dish))),
+    Cell = as.integer(parse_number(as.character(Cell))),
+    dendrite = as.integer(dendrite),
+    mito = as.integer(mito),
+    mito_area_um2 = as.numeric(mito_area_um2),
+    ATP_synthase_copies = as.numeric(probe00)
+  ) %>%
+  filter(
+    Condition %in% names(spacing_map), Date != "",
+    is.finite(mito_area_um2), mito_area_um2 > 0,
+    
+    is.finite(ATP_synthase_copies)
+  ) %>%
+  mutate(
+    ATP_synthase_copies_per_mito_um2 = ATP_synthase_copies / mito_area_um2,
+    Condition = factor(Condition, levels = names(spacing_map)),
+    Date = factor(Date),
+    x_pos = unname(spacing_map[as.character(Condition)]),
+    Condition_Date = paste(Condition, Date, sep = "_")
+  )
+
+if (nrow(atp_mito) == 0) stop("No valid ATP synthase measurements remain.")
+
+atp_mito %>%
+  select(Date, Condition, Dish, Cell, dendrite, mito, mito_area_um2,
+         ATP_synthase_copies, ATP_synthase_copies_per_mito_um2) %>%
+  mutate(across(where(is.numeric), ~ round(.x, 3)))
+```
+
+## Summary
+
+```{r fig-s9h-summary}
+summary_table <- atp_mito %>%
+  group_by(Condition) %>%
+  summarise(
+    n_Mitochondria = n_distinct(Date, Dish, Cell, dendrite, mito),
+    n_Dendrites = n_distinct(Date, Dish, Cell, dendrite),
+    n_Cells = n_distinct(Date, Dish, Cell),
+    n_Experiment_Dates = n_distinct(Date),
+    `Mean (SE)` = sprintf(
+      "%.3f (%.3f)",
+      mean(ATP_synthase_copies_per_mito_um2),
+      sd(ATP_synthase_copies_per_mito_um2) / sqrt(n())
+    ),
+    .groups = "drop"
+  )
+
+summary_table
+```
+
+## Statistics
+
+Two-way ANOVA with condition and experiment date (Type I sums of squares), followed by Tukey HSD.
+
+```{r fig-s9h-statistics}
+fit_aov <- aov(ATP_synthase_copies_per_mito_um2 ~ Condition * Date, data = atp_mito)
+condition_p <- as.numeric(anova(fit_aov)["Condition", "Pr(>F)"])
+posthoc_p <- as.numeric(TukeyHSD(fit_aov, "Condition")$Condition[1, "p adj"])
+format_p <- function(p) ifelse(p < 0.0001, "<0.0001", sprintf("%.4f", p))
+
+stats_table <- tibble(
+  Test = "Two-way ANOVA with Tukey HSD",
+  Comparison = "Control vs TTX",
+  `Control mean (SE)` = summary_table$`Mean (SE)`[summary_table$Condition == "Control"],
+  `TTX mean (SE)` = summary_table$`Mean (SE)`[summary_table$Condition == "TTX"],
+  `Condition p` = format_p(condition_p),
+  `Tukey p` = format_p(posthoc_p)
+)
+
+stats_table
+
+anova(fit_aov)
+```
+
+## Plot
+
+```{r fig-s9h-plot, fig.width=15, fig.height=20}
+set.seed(20261109)
+date_levels <- levels(atp_mito$Date)
+date_colors <- c(
+  setNames(rep(c("#1A1A1A", "#4D4D4D", "#777B7E"), length.out = length(date_levels)), paste("Control", date_levels, sep = "_")),
+  setNames(rep(c("#168C8B", "#42B3B2", "#70D6D4"), length.out = length(date_levels)), paste("TTX", date_levels, sep = "_"))
+)
+
+stars <- case_when(posthoc_p < 0.001 ~ "***", posthoc_p < 0.01 ~ "**",
+                   posthoc_p < 0.05 ~ "*", TRUE ~ "ns")
+plot_stats <- tibble(x1 = 1, x2 = 2.2, y = 102, stars) %>%
+  filter(stars != "ns")
+
+figs9h_plot <- ggplot(atp_mito, aes(x_pos, ATP_synthase_copies_per_mito_um2, color = Condition_Date)) +
+  ggbeeswarm::geom_beeswarm(cex = 3, priority = "random", size = 12, corral = "random") +
+  geom_boxplot(aes(group = x_pos), fill = NA, width = 1, linewidth = 2,
+               outlier.shape = NA, color = "black") +
+  stat_summary(aes(group = x_pos), fun = mean, geom = "point",
+               shape = 15, size = 20, color = "black") +
+  geom_segment(data = plot_stats, aes(x = x1, xend = x2, y = y, yend = y),
+               inherit.aes = FALSE, linewidth = 2, color = "black") +
+  geom_text(data = plot_stats, aes(x = (x1 + x2) / 2, y = y + 3, label = stars),
+            inherit.aes = FALSE, size = 25, color = "black") +
+  scale_x_continuous(breaks = unname(spacing_map),
+                     labels = c("control", "homeostatic\nplasticity")) +
+  scale_y_continuous(expand = expansion(mult = c(0.05, 0.15))) +
+  scale_color_manual(values = date_colors) +
+  labs(x = NULL, y = "ATP synthase copies<br>per mito (&micro;m<sup>2</sup>)") +
+  theme_classic() +
+  theme(axis.title.x = element_text(size = 80, color = "black"),
+        axis.title.y = ggtext::element_markdown(size = 80, color = "black"),
+        axis.text = element_text(size = 80, color = "black"),
+        axis.ticks = element_line(linewidth = 5, color = "black"),
+        axis.ticks.length = grid::unit(0.5, "cm"),
+        axis.line = element_line(linewidth = 2, color = "black"),
+        legend.position = "none")
+
+figs9h_plot
+```
+
+```{r fig-s9h-save, include=FALSE}
+dir.create("./Graphs", recursive = TRUE, showWarnings = FALSE)
+
+ggsave(
+  "./Graphs/Fig S9H.png", figs9h_plot,
+  width = 15, height = 20, units = "in", dpi = 300
+)
+
+tibble(Figure = "Fig S9H", File = "./Graphs/Fig S9H.png")
+```

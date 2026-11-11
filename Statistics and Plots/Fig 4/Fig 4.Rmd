@@ -1,0 +1,386 @@
+---
+title: "Figure 4: MIC60 and ATP synthase copy numbers"
+knit: (function(inputFile, encoding) { inputFile <- normalizePath(inputFile); oldwd <- setwd(dirname(inputFile)); on.exit(setwd(oldwd)); rmarkdown::render(basename(inputFile), encoding = encoding, output_file = "Fig 4.html", knit_root_dir = getwd()) })
+output:
+  html_document:
+    theme: darkly
+    highlight: breezedark
+    df_print: paged
+    toc: true
+    toc_depth: 1
+    toc_float: true
+    code_folding: hide
+    self_contained: true
+    mathjax: null
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE,
+                      fig.width = 30, fig.height = 20, fig.retina = 1,
+                      out.width = "100%", fig.align = "center")
+suppressPackageStartupMessages({
+  library(dplyr); library(readr); library(ggplot2); library(ggbeeswarm)
+  library(ggtext); library(afex); library(emmeans)
+})
+
+set.seed(20261109)
+options(width = 120, dplyr.summarise.inform = FALSE)
+options(contrasts = c("contr.treatment", "contr.poly"))
+
+```
+
+# Fig 4D
+
+MIC60 copy number in juxtaspinal and non-juxtaspinal mitochondrial regions measured by DNA-PAINT.
+
+**update for 2026 pending** — The non-juxtaspinal treatment comparison gives p ≈ 0.779. The v3 legend reports p = 0.999.
+
+**Source data**  
+`Fig 4 D, E juxta.csv`, `Fig 4 D, E nonjuxta.csv`
+
+**Columns**
+
+- `Date` — Experiment date
+- `Condition` — Control or TTX
+- `Dish` — Culture dish ID
+- `Cell` — Cell ID
+- `dendrite` — Dendrite ID
+- `spine` — Spine ID
+- `probe02` — MIC60 copy count
+- `non_juxta` — Non-juxtaspinal region ID
+
+## Data
+
+The input file identifies the region type.
+
+```{r fig-4d-data}
+condition_order <- c("Control", "TTX")
+region_order <- c("Juxta", "Non Juxta")
+group_order <- c("Juxta Control", "Juxta TTX", "Non Juxta Control", "Non Juxta TTX")
+spacing_map <- c("Juxta Control" = 1, "Juxta TTX" = 2.2,
+                 "Non Juxta Control" = 3.8, "Non Juxta TTX" = 5)
+
+juxta_mic60 <- read_csv("./Fig 4 D, E juxta.csv", show_col_types = FALSE) %>%
+  transmute(Date = trimws(as.character(Date)), Condition = trimws(Condition),
+            Dish = as.integer(parse_number(as.character(Dish))),
+            Cell = as.integer(parse_number(as.character(Cell))),
+            dendrite = as.integer(dendrite), mito = as.integer(spine),
+            Region = "Juxta", Mic60 = as.numeric(probe02))
+
+nonjuxta_mic60 <- read_csv("./Fig 4 D, E nonjuxta.csv", show_col_types = FALSE) %>%
+  transmute(Date = trimws(as.character(Date)), Condition = trimws(Condition),
+            Dish = as.integer(parse_number(as.character(Dish))),
+            Cell = as.integer(parse_number(as.character(Cell))),
+            dendrite = as.integer(dendrite), mito = as.integer(non_juxta),
+            Region = "Non Juxta", Mic60 = as.numeric(probe02))
+
+Mic60_df <- bind_rows(juxta_mic60, nonjuxta_mic60) %>%
+  filter(Condition %in% condition_order, Date != "", is.finite(Mic60)) %>%
+  mutate(Date = factor(Date), Condition = factor(Condition, levels = condition_order),
+         Region = factor(Region, levels = region_order),
+         Group = factor(paste(Region, Condition), levels = group_order),
+         x_pos = unname(spacing_map[as.character(Group)]),
+         Group_Date = paste(Group, Date, sep = "_"))
+if (!nrow(Mic60_df)) stop("No valid Mic60 measurements remain.")
+Mic60_df %>% mutate(across(where(is.numeric), ~ round(.x, 3)))
+```
+
+## Summary
+
+```{r fig-4d-summary}
+summary_table <- Mic60_df %>% group_by(Group) %>%
+  summarise(n_Mitochondria = n_distinct(Date, Dish, Cell, dendrite, mito),
+            n_Dendrites = n_distinct(Date, Dish, Cell, dendrite),
+            n_Cells = n_distinct(Date, Dish, Cell), n_Experiment_Dates = n_distinct(Date),
+            `Mean (SE)` = sprintf("%.3f (%.3f)", mean(Mic60),
+                                  sd(Mic60) / sqrt(n())), .groups = "drop")
+summary_table
+```
+
+## Statistics
+
+Three-way ANOVA with condition, region, experiment date, and their interactions (Type I sums of squares). Pairwise comparisons use Tukey adjustment.
+
+```{r fig-4d-statistics}
+format_p <- function(p) ifelse(p < 0.0001, "<0.0001", sprintf("%.4f", p))
+fit_aov <- aov(Mic60 ~ Condition * Region * Date, data = Mic60_df)
+aov_tab <- anova(fit_aov)
+anova_table <- as.data.frame(aov_tab) %>% tibble::rownames_to_column("Effect") %>%
+  filter(trimws(Effect) != "Residuals") %>%
+  transmute(Effect = dplyr::recode(trimws(Effect), Condition = "Condition",
+                                   Region = "Region", Date = "Date",
+                                   `Condition:Region` = "Condition x Region",
+                                   `Condition:Date` = "Condition x Date",
+                                   `Region:Date` = "Region x Date",
+                                   `Condition:Region:Date` = "Condition x Region x Date"),
+            df = Df, F = round(`F value`, 3), `p value` = format_p(`Pr(>F)`))
+anova_table
+
+cell_emm <- emmeans::emmeans(fit_aov, ~ Region * Condition)
+all_pairs <- as.data.frame(emmeans::contrast(cell_emm, "pairwise", adjust = "tukey"))
+pair_parts <- strsplit(as.character(all_pairs$contrast), " - ", fixed = TRUE)
+pair_key <- function(x, y) paste(sort(c(x, y)), collapse = "|")
+all_pairs <- all_pairs %>%
+  mutate(group1 = vapply(pair_parts, `[`, character(1), 1),
+         group2 = vapply(pair_parts, `[`, character(1), 2),
+         pair = mapply(pair_key, group1, group2))
+
+comparison_results <- tibble(
+  group1 = c("Juxta Control", "Non Juxta Control", "Juxta Control", "Juxta TTX"),
+  group2 = c("Juxta TTX", "Non Juxta TTX", "Non Juxta Control", "Non Juxta TTX")
+) %>%
+  mutate(pair = mapply(pair_key, group1, group2)) %>%
+  left_join(all_pairs %>% select(pair, p_value = p.value), by = "pair") %>%
+  select(-pair)
+
+group_means <- Mic60_df %>% group_by(Group) %>%
+  summarise(mean = mean(Mic60), SE = sd(Mic60) / sqrt(n()), .groups = "drop")
+stats_table <- comparison_results %>%
+  left_join(group_means, by = c("group1" = "Group")) %>% rename(mean1 = mean, SE1 = SE) %>%
+  left_join(group_means, by = c("group2" = "Group")) %>% rename(mean2 = mean, SE2 = SE) %>%
+  transmute(Test = "Three-way ANOVA with Tukey post hoc",
+            Comparison = paste(group1, "vs", group2),
+            `Group 1 mean (SE)` = sprintf("%.3f (%.3f)", mean1, SE1),
+            `Group 2 mean (SE)` = sprintf("%.3f (%.3f)", mean2, SE2),
+            `Condition p` = format_p(aov_tab["Condition", "Pr(>F)"]),
+            `Region p` = format_p(aov_tab["Region", "Pr(>F)"]),
+            `Condition x Region p` = format_p(aov_tab["Condition:Region", "Pr(>F)"]),
+            `Tukey p` = format_p(p_value))
+stats_table
+```
+
+## Plot
+
+```{r fig-4d-plot, fig.width=30, fig.height=24, fig.retina=1, out.width="100%", fig.align="center"}
+set.seed(20261109)
+p_to_stars <- function(p) case_when(p < 0.001 ~ "***", p < 0.01 ~ "**",
+                                    p < 0.05 ~ "*", TRUE ~ "ns")
+test_results <- comparison_results %>%
+  filter(group1 == "Juxta Control", group2 == "Juxta TTX") %>%
+  mutate(group1_x = unname(spacing_map[group1]), group2_x = unname(spacing_map[group2]),
+         y_position = 125, stars = p_to_stars(p_value)) %>% filter(stars != "ns")
+
+date_levels <- levels(Mic60_df$Date)
+group_date_colors <- c(
+  setNames(rep(c("#1A1A1A", "#4D4D4D", "#777B7E"), length.out = length(date_levels)),
+           paste("Juxta Control", date_levels, sep = "_")),
+  setNames(rep(c("#A949D5", "#7A20B5", "#D871F5"), length.out = length(date_levels)),
+           paste("Juxta TTX", date_levels, sep = "_")),
+  setNames(rep(c("#9E9E9E", "#BDBDBD", "#D9D9D9"), length.out = length(date_levels)),
+           paste("Non Juxta Control", date_levels, sep = "_")),
+  setNames(rep(c("#350060", "#4B0082", "#7A20B5"), length.out = length(date_levels)),
+           paste("Non Juxta TTX", date_levels, sep = "_"))
+)
+
+fig4d_plot <- ggplot(Mic60_df, aes(x_pos, Mic60, color = Group_Date)) +
+  ggbeeswarm::geom_beeswarm(cex = 2, priority = "random", size = 15, corral = "random") +
+  geom_boxplot(aes(group = x_pos), fill = NA, width = 1, linewidth = 2,
+               outlier.shape = NA, color = "black") +
+  stat_summary(aes(group = x_pos), fun = mean, geom = "point",
+               shape = 15, size = 20, color = "black") +
+  geom_segment(data = test_results,
+               aes(x = group1_x, xend = group2_x, y = y_position, yend = y_position),
+               inherit.aes = FALSE, linewidth = 2, color = "black") +
+  geom_text(data = test_results,
+            aes(x = (group1_x + group2_x) / 2, y = y_position + 3, label = stars),
+            inherit.aes = FALSE, size = 30, color = "black", fontface = "bold") +
+  scale_x_continuous(breaks = unname(spacing_map),
+                     labels = c("control", "homeostatic\nplasticity",
+                                "control", "homeostatic\nplasticity")) +
+  scale_color_manual(values = group_date_colors) +
+  scale_y_continuous(oob = scales::oob_keep, breaks = c(0, 25, 50, 75, 100, 125),
+                     limits = c(-5, 135), expand = c(0, 0)) +
+  labs(x = "", y = "no. of MIC60 copies") +
+  theme_classic() +
+  theme(axis.title = element_text(size = 80, color = "black"),
+        axis.text = element_text(size = 80, color = "black"),
+        axis.ticks = element_line(linewidth = 5, color = "black"),
+        axis.ticks.length = grid::unit(0.5, "cm"),
+        axis.line = element_line(linewidth = 2, color = "black"),
+        legend.position = "none")
+fig4d_plot
+```
+
+```{r fig-4d-save, include=FALSE}
+dir.create("./Graphs", recursive = TRUE, showWarnings = FALSE)
+output_file <- "./Graphs/Fig 4D.png"
+ggsave(output_file, fig4d_plot, width = 30, height = 24, units = "in", dpi = 300)
+tibble(Figure = "Fig 4D", File = output_file)
+```
+
+# Fig 4E
+
+ATP synthase copy number in juxtaspinal and non-juxtaspinal mitochondrial regions measured by DNA-PAINT.
+
+**Source data**  
+`Fig 4 D, E juxta.csv`, `Fig 4 D, E nonjuxta.csv`
+
+**Columns**
+
+- `Date` — Experiment date
+- `Condition` — Control or TTX
+- `Dish` — Culture dish ID
+- `Cell` — Cell ID
+- `dendrite` — Dendrite ID
+- `spine` — Spine ID
+- `probe01` — ATP synthase copy count
+- `non_juxta` — Non-juxtaspinal region ID
+
+## Data
+
+The input file identifies the region type.
+
+```{r fig-4e-data}
+condition_order <- c("Control", "TTX")
+region_order <- c("Juxta", "Non Juxta")
+group_order <- c("Juxta Control", "Juxta TTX", "Non Juxta Control", "Non Juxta TTX")
+spacing_map <- c("Juxta Control" = 1, "Juxta TTX" = 2.2,
+                 "Non Juxta Control" = 3.8, "Non Juxta TTX" = 5)
+
+juxta_atp <- read_csv("./Fig 4 D, E juxta.csv", show_col_types = FALSE) %>%
+  transmute(Date = trimws(as.character(Date)), Condition = trimws(Condition),
+            Dish = as.integer(parse_number(as.character(Dish))),
+            Cell = as.integer(parse_number(as.character(Cell))),
+            dendrite = as.integer(dendrite), mito = as.integer(spine),
+            Region = "Juxta", ATP_synthase = as.numeric(probe01))
+
+nonjuxta_atp <- read_csv("./Fig 4 D, E nonjuxta.csv", show_col_types = FALSE) %>%
+  transmute(Date = trimws(as.character(Date)), Condition = trimws(Condition),
+            Dish = as.integer(parse_number(as.character(Dish))),
+            Cell = as.integer(parse_number(as.character(Cell))),
+            dendrite = as.integer(dendrite), mito = as.integer(non_juxta),
+            Region = "Non Juxta", ATP_synthase = as.numeric(probe01))
+
+ATP_df <- bind_rows(juxta_atp, nonjuxta_atp) %>%
+  filter(Condition %in% condition_order, Date != "", is.finite(ATP_synthase)) %>%
+  mutate(Date = factor(Date), Condition = factor(Condition, levels = condition_order),
+         Region = factor(Region, levels = region_order),
+         Group = factor(paste(Region, Condition), levels = group_order),
+         x_pos = unname(spacing_map[as.character(Group)]),
+         Group_Date = paste(Group, Date, sep = "_"))
+if (!nrow(ATP_df)) stop("No valid ATP synthase measurements remain.")
+ATP_df %>% mutate(across(where(is.numeric), ~ round(.x, 3)))
+```
+
+## Summary
+
+```{r fig-4e-summary}
+summary_table <- ATP_df %>% group_by(Group) %>%
+  summarise(n_Mitochondria = n_distinct(Date, Dish, Cell, dendrite, mito),
+            n_Dendrites = n_distinct(Date, Dish, Cell, dendrite),
+            n_Cells = n_distinct(Date, Dish, Cell), n_Experiment_Dates = n_distinct(Date),
+            `Mean (SE)` = sprintf("%.3f (%.3f)", mean(ATP_synthase),
+                                  sd(ATP_synthase) / sqrt(n())), .groups = "drop")
+summary_table
+```
+
+## Statistics
+
+Three-way ANOVA with condition, region, experiment date, and their interactions (Type I sums of squares). Pairwise comparisons use Tukey adjustment.
+
+```{r fig-4e-statistics}
+format_p <- function(p) ifelse(p < 0.0001, "<0.0001", sprintf("%.4f", p))
+fit_aov <- aov(ATP_synthase ~ Condition * Region * Date, data = ATP_df)
+aov_tab <- anova(fit_aov)
+anova_table <- as.data.frame(aov_tab) %>% tibble::rownames_to_column("Effect") %>%
+  filter(trimws(Effect) != "Residuals") %>%
+  transmute(Effect = dplyr::recode(trimws(Effect), Condition = "Condition",
+                                   Region = "Region", Date = "Date",
+                                   `Condition:Region` = "Condition x Region",
+                                   `Condition:Date` = "Condition x Date",
+                                   `Region:Date` = "Region x Date",
+                                   `Condition:Region:Date` = "Condition x Region x Date"),
+            df = Df, F = round(`F value`, 3), `p value` = format_p(`Pr(>F)`))
+anova_table
+
+cell_emm <- emmeans::emmeans(fit_aov, ~ Region * Condition)
+all_pairs <- as.data.frame(emmeans::contrast(cell_emm, "pairwise", adjust = "tukey"))
+pair_parts <- strsplit(as.character(all_pairs$contrast), " - ", fixed = TRUE)
+pair_key <- function(x, y) paste(sort(c(x, y)), collapse = "|")
+all_pairs <- all_pairs %>%
+  mutate(group1 = vapply(pair_parts, `[`, character(1), 1),
+         group2 = vapply(pair_parts, `[`, character(1), 2),
+         pair = mapply(pair_key, group1, group2))
+
+comparison_results <- tibble(
+  group1 = c("Juxta Control", "Non Juxta Control", "Juxta Control", "Juxta TTX"),
+  group2 = c("Juxta TTX", "Non Juxta TTX", "Non Juxta Control", "Non Juxta TTX")
+) %>%
+  mutate(pair = mapply(pair_key, group1, group2)) %>%
+  left_join(all_pairs %>% select(pair, p_value = p.value), by = "pair") %>%
+  select(-pair)
+
+group_means <- ATP_df %>% group_by(Group) %>%
+  summarise(mean = mean(ATP_synthase), SE = sd(ATP_synthase) / sqrt(n()), .groups = "drop")
+stats_table <- comparison_results %>%
+  left_join(group_means, by = c("group1" = "Group")) %>% rename(mean1 = mean, SE1 = SE) %>%
+  left_join(group_means, by = c("group2" = "Group")) %>% rename(mean2 = mean, SE2 = SE) %>%
+  transmute(Test = "Three-way ANOVA with Tukey post hoc",
+            Comparison = paste(group1, "vs", group2),
+            `Group 1 mean (SE)` = sprintf("%.3f (%.3f)", mean1, SE1),
+            `Group 2 mean (SE)` = sprintf("%.3f (%.3f)", mean2, SE2),
+            `Condition p` = format_p(aov_tab["Condition", "Pr(>F)"]),
+            `Region p` = format_p(aov_tab["Region", "Pr(>F)"]),
+            `Condition x Region p` = format_p(aov_tab["Condition:Region", "Pr(>F)"]),
+            `Tukey p` = format_p(p_value))
+stats_table
+```
+
+## Plot
+
+```{r fig-4e-plot, fig.width=30, fig.height=24, fig.retina=1, out.width="100%", fig.align="center"}
+set.seed(20261109)
+p_to_stars <- function(p) case_when(p < 0.001 ~ "***", p < 0.01 ~ "**",
+                                    p < 0.05 ~ "*", TRUE ~ "ns")
+test_results <- comparison_results %>%
+  filter(group1 == "Juxta Control", group2 == "Juxta TTX") %>%
+  mutate(group1_x = unname(spacing_map[group1]), group2_x = unname(spacing_map[group2]),
+         y_position = 130, stars = p_to_stars(p_value)) %>% filter(stars != "ns")
+
+date_levels <- levels(ATP_df$Date)
+group_date_colors <- c(
+  setNames(rep(c("#1A1A1A", "#4D4D4D", "#777B7E"), length.out = length(date_levels)),
+           paste("Juxta Control", date_levels, sep = "_")),
+  setNames(rep(c("#168C8B", "#42B3B2", "#70D6D4"), length.out = length(date_levels)),
+           paste("Juxta TTX", date_levels, sep = "_")),
+  setNames(rep(c("#9E9E9E", "#BDBDBD", "#D9D9D9"), length.out = length(date_levels)),
+           paste("Non Juxta Control", date_levels, sep = "_")),
+  setNames(rep(c("#123F3F", "#205B5A", "#307675"), length.out = length(date_levels)),
+           paste("Non Juxta TTX", date_levels, sep = "_"))
+)
+
+fig4e_plot <- ggplot(ATP_df, aes(x_pos, ATP_synthase, color = Group_Date)) +
+  ggbeeswarm::geom_beeswarm(cex = 2, priority = "random", size = 15, corral = "random") +
+  geom_boxplot(aes(group = x_pos), fill = NA, width = 1, linewidth = 2,
+               outlier.shape = NA, color = "black") +
+  stat_summary(aes(group = x_pos), fun = mean, geom = "point",
+               shape = 15, size = 20, color = "black") +
+  geom_segment(data = test_results,
+               aes(x = group1_x, xend = group2_x, y = y_position, yend = y_position),
+               inherit.aes = FALSE, linewidth = 2, color = "black") +
+  geom_text(data = test_results,
+            aes(x = (group1_x + group2_x) / 2, y = y_position + 3, label = stars),
+            inherit.aes = FALSE, size = 30, color = "black", fontface = "bold") +
+  scale_x_continuous(breaks = unname(spacing_map),
+                     labels = c("control", "homeostatic\nplasticity",
+                                "control", "homeostatic\nplasticity")) +
+  scale_color_manual(values = group_date_colors) +
+  scale_y_continuous(oob = scales::oob_keep, breaks = c(0, 25, 50, 75, 100, 125),
+                     limits = c(-5, 140), expand = c(0, 0)) +
+  labs(x = "", y = "no. of ATP synthase copies") +
+  theme_classic() +
+  theme(axis.title = element_text(size = 80, color = "black"),
+        axis.text = element_text(size = 80, color = "black"),
+        axis.ticks = element_line(linewidth = 5, color = "black"),
+        axis.ticks.length = grid::unit(0.5, "cm"),
+        axis.line = element_line(linewidth = 2, color = "black"),
+        legend.position = "none")
+fig4e_plot
+```
+
+```{r fig-4e-save, include=FALSE}
+dir.create("./Graphs", recursive = TRUE, showWarnings = FALSE)
+output_file <- "./Graphs/Fig 4E.png"
+ggsave(output_file, fig4e_plot, width = 30, height = 24, units = "in", dpi = 300)
+tibble(Figure = "Fig 4E", File = output_file)
+```
